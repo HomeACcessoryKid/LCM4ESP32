@@ -1,0 +1,9 @@
+# ESP-IDF Partition Table
+# made to use the upper half of a 4M flash, which is rarely used
+# so if it dies, my ESP32 remains usefull and I can flash many test firmwares
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x209000,  0x4000,
+otadata,  data, ota,     0x20d000,  0x2000,
+phy_init, data, phy,     0x20f000,  0x1000,
+ota_1,    app,  ota_1,   0x210000, 0xf0000,
+ota_0,    app,  ota_0,   0x300000, 0x100000,
