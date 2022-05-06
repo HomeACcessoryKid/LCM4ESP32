@@ -1,4 +1,13 @@
 /* OTA example adapted for LCM4ESP32
+   based on fix for https://github.com/espressif/esp-idf/issues/8873:
+   /opt/esp/idf/components/esp_http_client# mv esp_http_client.c esp_http_client.c.0
+   /opt/esp/idf/components/esp_http_client# cat esp_http_client.c.0 | \
+   sed 's/http_utils_append_string(\&client->location/http_utils_assign_string(\&client->location/' > esp_http_client.c
+   root@15550ce5e2b8:/opt/esp/idf/components/esp_http_client# diff esp_http_client.c*
+   236c236
+   <         http_utils_assign_string(&client->location, at, length);
+   ---
+   >         http_utils_append_string(&client->location, at, length);
 
    This example code is in the Public Domain (or CC0 licensed, at your option.)
 
@@ -6,6 +15,7 @@
    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
    CONDITIONS OF ANY KIND, either express or implied.
 */
+
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -13,12 +23,12 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
-#include "esp_http_client.h"
+// #include "esp_http_client.h"
 #include "esp_flash_partitions.h"
 #include "esp_partition.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "driver/gpio.h"
+// #include "driver/gpio.h"
 #include "protocol_examples_common.h"
 #include "errno.h"
 
@@ -26,32 +36,8 @@
 #include "esp_wifi.h"
 #endif
 
-#define BUFFSIZE 1024
 #define HASH_LEN 32 /* SHA-256 digest length */
-
 static const char *TAG = "native_ota_example";
-/*an ota data write buffer ready to write to the flash*/
-static char ota_write_data[BUFFSIZE + 1] = { 0 };
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
-
-#define OTA_URL_SIZE 256
-
-static void http_cleanup(esp_http_client_handle_t client)
-{
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-}
-
-static void __attribute__((noreturn)) task_fatal_error(void)
-{
-    ESP_LOGE(TAG, "Exiting task due to fatal error...");
-    (void)vTaskDelete(NULL);
-
-    while (1) {
-        ;
-    }
-}
 
 static void print_sha256 (const uint8_t *image_hash, const char *label)
 {
@@ -63,226 +49,199 @@ static void print_sha256 (const uint8_t *image_hash, const char *label)
     ESP_LOGI(TAG, "%s: %s", label, hash_print);
 }
 
-static void infinite_loop(void)
-{
-    int i = 0;
-    ESP_LOGI(TAG, "When a new firmware is available on the server, press the reset button to download it");
-    while(1) {
-        ESP_LOGI(TAG, "Waiting for a new firmware ... %d", ++i);
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-    }
-}
 
-static void ota_example_task(void *pvParameter)
-{
-    esp_err_t err;
-    /* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
-    esp_ota_handle_t update_handle = 0 ;
-    const esp_partition_t *update_partition = NULL;
+#include "ota.h"
 
-    ESP_LOGI(TAG, "Starting OTA example");
 
-    const esp_partition_t *configured = esp_ota_get_boot_partition();
-    const esp_partition_t *running = esp_ota_get_running_partition();
-
-    if (configured != running) {
-        ESP_LOGW(TAG, "Configured OTA boot partition at offset 0x%08x, but running from offset 0x%08x",
-                 configured->address, running->address);
-        ESP_LOGW(TAG, "(This can happen if either the OTA boot data or preferred boot image become corrupted somehow.)");
-    }
-    ESP_LOGI(TAG, "Running partition type %d subtype %d (offset 0x%08x)",
-             running->type, running->subtype, running->address);
-
-    esp_http_client_config_t config = {
-        .url = "https://github.com/HomeACcessoryKid/LCM4ESP32/releases/latest",
-        .cert_pem = (char *)server_cert_pem_start,
-        .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
-        .keep_alive_enable = true,
-        .buffer_size    = 1024,
-        .buffer_size_tx = 1024,
-    };
-
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        ESP_LOGE(TAG, "Failed to initialise HTTP connection");
-        task_fatal_error();
-    }
-    err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        task_fatal_error();
-    }
-    esp_http_client_fetch_headers(client);
-    int code=esp_http_client_get_status_code(client);
-    printf("code=%d\n",code);
-//     this doesn't work because it doesn't actually flush the internal buffer
-//     int flushlen;
-//     printf("result %d of ",esp_http_client_flush_response(client,&flushlen));
-//     printf("flushed %d\n",flushlen);
-    ota_write_data[esp_http_client_read(client, ota_write_data, BUFFSIZE)]=0;
-    printf("flushed: %s\n",ota_write_data);
-    
-//     this doesn't work because client struct set up as private...
-//     printf("loca=%s\n",&client->location);
-    esp_http_client_set_redirection(client);
-    char url[500];
-    esp_http_client_get_url(client, url, 500);
-    printf("URL=%s\n",url);
-    char *found_ptr=strstr(url,"releases/tag/");
-    if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
-    char *version=malloc(strlen(found_ptr+13));
-    strcpy(version,found_ptr+13);
-    printf("version:\"%s\"\n",version);
-
-    esp_http_client_set_url(client,"https://github.com/HomeACcessoryKid/LCM4ESP32/releases/download/0.0.1/LCM4ESP32.bin");
-
-    err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        task_fatal_error();
-    }
-    esp_http_client_fetch_headers(client);
-
-    code=esp_http_client_get_status_code(client);
-    printf("code=%d\n",code);
-    
-    if (code==302) {
-        ota_write_data[esp_http_client_read(client, ota_write_data, BUFFSIZE)]=0;
-        printf("flushed: %s\n",ota_write_data);        
-        esp_http_client_set_redirection(client); // this fails because it still has the original location pre-pended to URL
-    }
-
-    err = esp_http_client_open(client, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client);
-        task_fatal_error();
-    }
-    esp_http_client_fetch_headers(client);    
-    
-
-    update_partition = esp_ota_get_next_update_partition(NULL);
-    assert(update_partition != NULL);
-    ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x",
-             update_partition->subtype, update_partition->address);
-
-    int binary_file_length = 0;
-    /*deal with all receive packet*/
-    bool image_header_was_checked = false;
-    while (1) {
-        int data_read = esp_http_client_read(client, ota_write_data, BUFFSIZE);
-        if (data_read < 0) {
-            ESP_LOGE(TAG, "Error: SSL data read error");
-            http_cleanup(client);
-            task_fatal_error();
-        } else if (data_read > 0) {
-            if (image_header_was_checked == false) {
-                esp_app_desc_t new_app_info;
-                if (data_read > sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
-                    // check current version with downloading
-                    memcpy(&new_app_info, &ota_write_data[sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t)], sizeof(esp_app_desc_t));
-                    ESP_LOGI(TAG, "New firmware version: %s", new_app_info.version);
-
-                    esp_app_desc_t running_app_info;
-                    if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
-                        ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
-                    }
-
-                    const esp_partition_t* last_invalid_app = esp_ota_get_last_invalid_partition();
-                    esp_app_desc_t invalid_app_info;
-                    if (esp_ota_get_partition_description(last_invalid_app, &invalid_app_info) == ESP_OK) {
-                        ESP_LOGI(TAG, "Last invalid firmware version: %s", invalid_app_info.version);
-                    }
-
-                    // check current version with last invalid partition
-                    if (last_invalid_app != NULL) {
-                        if (memcmp(invalid_app_info.version, new_app_info.version, sizeof(new_app_info.version)) == 0) {
-                            ESP_LOGW(TAG, "New version is the same as invalid version.");
-                            ESP_LOGW(TAG, "Previously, there was an attempt to launch the firmware with %s version, but it failed.", invalid_app_info.version);
-                            ESP_LOGW(TAG, "The firmware has been rolled back to the previous version.");
-                            http_cleanup(client);
-                            infinite_loop();
-                        }
-                    }
-#ifndef CONFIG_EXAMPLE_SKIP_VERSION_CHECK
-                    if (memcmp(new_app_info.version, running_app_info.version, sizeof(new_app_info.version)) == 0) {
-                        ESP_LOGW(TAG, "Current running version is the same as a new. We will not continue the update.");
-                        http_cleanup(client);
-                        infinite_loop();
-                    }
+void ota_task(void *arg) {
+    int holdoff_time=1; //32bit, in seconds
+    char* user_repo=NULL;
+    char* user_version=NULL;
+    char* user_file=NULL;
+    char*  new_version=NULL;
+    char*  ota_version=NULL;
+//    char*  lcm_version=NULL;
+#ifndef OTABOOT    
+    char*  btl_version=NULL;
 #endif
-
-                    image_header_was_checked = true;
-
-                    err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
-                    if (err != ESP_OK) {
-                        ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
-                        http_cleanup(client);
-                        esp_ota_abort(update_handle);
-                        task_fatal_error();
+    signature_t signature;
+    extern int active_cert_sector;
+    extern int backup_cert_sector;
+    int file_size; //32bit
+#ifdef OTABOOT    
+    int have_private_key=0;
+#endif
+    int keyid,foundkey=0;
+    char keyname[KEYNAMELEN];
+    ota_init();
+    
+//     file_size=ota_get_pubkey(active_cert_sector);
+//     
+// #ifdef OTABOOT    
+//     if (!ota_get_privkey()) { //have private key
+//         have_private_key=1;
+//         UDPLGP("have private key\n");
+//         if (ota_verify_pubkey()) {
+//             ota_sign(active_cert_sector,file_size, &signature, "public-1.key");//use this (old) privkey to sign the (new) pubkey
+//             vTaskDelete(NULL); //upload the signature out of band to github and flash the new private key to backupsector
+//         }
+//     }
+// #else
+//     btl_version=ota_get_btl_version();
+// #endif
+    if (ota_boot()) ota_write_status("0.0.0");  //we will have to get user code from scratch if running ota_boot
+/*    
+    if ( !ota_load_user_app(&user_repo, &user_version, &user_file)) { //repo/file must be configured
+        if (!strcmp(user_repo,HAAREPO)) user_file=HAAFILE;
+#ifdef OTABOOT    
+        if (ota_boot()) {
+            new_version=ota_get_version(user_repo); //check if this repository exists at all
+            if (!strcmp(new_version,"404")) {
+                UDPLGP("%s does not exist! HALTED TILL NEXT POWERCYCLE!\n",user_repo);
+                vTaskDelete(NULL);
+            }
+        }
+#endif
+        
+        for (;;) { //escape from this loop by continue (try again) or break (boots into slot 0)
+            UDPLGP("--- entering the loop\n");
+            //UDPLGP("%d\n",sdk_system_get_time()/1000);
+            //need for a protection against an electricity outage recovery storm
+            vTaskDelay(holdoff_time*(1000/portTICK_PERIOD_MS));
+            holdoff_time*=HOLDOFF_MULTIPLIER; holdoff_time=(holdoff_time<HOLDOFF_MAX) ? holdoff_time : HOLDOFF_MAX;
+            
+            //do we still have a valid internet connexion? dns resolve github... should not be private IP
+            
+            ota_get_pubkey(active_cert_sector); //in case the LCM update is in a cycle
+            
+            ota_set_verify(0); //should work even without certificates
+            //if (lcm_version) free(lcm_version);
+            if (ota_version) free(ota_version);
+            ota_version=ota_get_version(OTAREPO);
+            if (ota_get_hash(OTAREPO, ota_version, CERTFILE, &signature)) { //no certs.sector.sig exists yet on server
+#ifdef OTABOOT    
+                if (have_private_key) {
+                    ota_sign(active_cert_sector,SECTORSIZE, &signature, CERTFILE); //reports to console
+                    vTaskDelete(NULL); //upload the signature out of band to github and start again
+                } else
+#endif
+                    continue; //loop and try again later
+            }
+            if (ota_verify_hash(active_cert_sector,&signature)) { //seems we need to download certificates
+                if (ota_verify_signature(&signature)) { //maybe an update on the public key
+                    keyid=1;
+                    while (sprintf(keyname,KEYNAME,keyid) , !ota_get_hash(OTAREPO, ota_version, keyname, &signature)) {
+                        if (!ota_verify_signature(&signature)) {foundkey=1; break;}
+                        keyid++;
                     }
-                    ESP_LOGI(TAG, "esp_ota_begin succeeded");
-                } else {
-                    ESP_LOGE(TAG, "received package is not fit len");
-                    http_cleanup(client);
-                    esp_ota_abort(update_handle);
-                    task_fatal_error();
+                    if (!foundkey) break; //leads to boot=0
+                    //we found the head of the chain of pubkeys
+                    while (--keyid) {
+                        ota_get_file(OTAREPO,ota_version,keyname,backup_cert_sector);
+                        if (ota_verify_hash(backup_cert_sector,&signature)) {foundkey=0; break;}
+                        ota_get_pubkey(backup_cert_sector); //get one newer pubkey
+                        sprintf(keyname,KEYNAME,keyid);
+                        if (ota_get_hash(OTAREPO,ota_version,keyname,&signature)) {foundkey=0; break;}
+                        if (ota_verify_signature(&signature)) {foundkey=0; break;}
+                    }
+                    if (!foundkey) break; //leads to boot=0
                 }
-            }
-            err = esp_ota_write( update_handle, (const void *)ota_write_data, data_read);
-            if (err != ESP_OK) {
-                http_cleanup(client);
-                esp_ota_abort(update_handle);
-                task_fatal_error();
-            }
-            binary_file_length += data_read;
-            ESP_LOGD(TAG, "Written image length %d", binary_file_length);
-        } else if (data_read == 0) {
-           /*
-            * As esp_http_client_read never returns negative error code, we rely on
-            * `errno` to check for underlying transport connectivity closure if any
-            */
-            if (errno == ECONNRESET || errno == ENOTCONN) {
-                ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
-                break;
-            }
-            if (esp_http_client_is_complete_data_received(client) == true) {
-                ESP_LOGI(TAG, "Connection closed");
-                break;
+                ota_get_file(OTAREPO,ota_version,CERTFILE,backup_cert_sector); //CERTFILE=public-1.key
+                if (ota_verify_hash(backup_cert_sector,&signature)) break; //leads to boot=0
+                ota_swap_cert_sector();
+                ota_get_pubkey(active_cert_sector);
+            } //certificates are good now
+            
+            if (ota_boot()) { //running the ota-boot software now
+#ifdef OTABOOT    
+                //take care our boot code gets a signature by loading it in boot1sector just for this purpose
+                if (ota_get_hash(OTAREPO, ota_version, BOOTFILE, &signature)) { //no signature yet
+                    if (have_private_key) {
+                        file_size=ota_get_file(OTAREPO,ota_version,BOOTFILE,BOOT1SECTOR);
+                        if (file_size<=0) continue; //try again later
+                        ota_finalize_file(BOOT1SECTOR);
+                        ota_sign(BOOT1SECTOR,file_size, &signature, BOOTFILE); //reports to console
+                        vTaskDelete(NULL); //upload the signature out of band to github and start again
+                    }
+                }
+                //switching over to a new repository, called LCM life-cycle-manager
+                //lcm_version=ota_get_version(LCMREPO);
+                //now get the latest ota main software in boot sector 1
+                if (ota_get_hash(OTAREPO, ota_version, MAINFILE, &signature)) { //no signature yet
+                    if (have_private_key) {
+                        file_size=ota_get_file(OTAREPO,ota_version,MAINFILE,BOOT1SECTOR);
+                        if (file_size<=0) continue; //try again later
+                        ota_finalize_file(BOOT1SECTOR);
+                        ota_sign(BOOT1SECTOR,file_size, &signature, MAINFILE); //reports to console
+                        vTaskDelete(NULL); //upload the signature out of band to github and start again
+                    } else {
+                        continue; //loop and try again later
+                    }
+                } else { //we have a signature, maybe also the main file?
+                    if (ota_verify_signature(&signature)) continue; //signature file is not signed by our key, ABORT
+                    if (ota_verify_hash(BOOT1SECTOR,&signature)) { //not yet downloaded
+                        file_size=ota_get_file(OTAREPO,ota_version,MAINFILE,BOOT1SECTOR);
+                        if (file_size<=0) continue; //try again later
+                        if (ota_verify_hash(BOOT1SECTOR,&signature)) continue; //download failed
+                        ota_finalize_file(BOOT1SECTOR);
+                    }
+                } //now file is here for sure and matches hash
+                //when switching to LCM we need to introduce the latest public key as used by LCM
+                //ota_get_file(LCMREPO,lcm_version,CERTFILE,backup_cert_sector);
+                //ota_get_pubkey(backup_cert_sector);
+                //if (ota_verify_signature(&signature)) continue; //this should never happen
+                ota_temp_boot(); //launches the ota software in bootsector 1
+#endif
+            } else {  //running ota-main software now
+#ifndef OTABOOT    
+                UDPLGP("--- running ota-main software\n");
+                //is there a newer version of the bootloader...
+                if (new_version) free(new_version);
+                new_version=ota_get_version(BTLREPO);
+                if (strcmp(new_version,"404")) {
+                    if (ota_compare(new_version,btl_version)>0) { //can only upgrade
+                        UDPLGP("BTLREPO=\'%s\' new_version=\'%s\' BTLFILE=\'%s\'\n",BTLREPO,new_version,BTLFILE);
+                        if (!ota_get_hash(BTLREPO, new_version, BTLFILE, &signature)) {
+                            if (!ota_verify_signature(&signature)) {
+                                file_size=ota_get_file(BTLREPO,new_version,BTLFILE,backup_cert_sector);
+                                if (file_size>0 && !ota_verify_hash(backup_cert_sector,&signature)) {
+                                    ota_finalize_file(backup_cert_sector);
+                                    ota_copy_bootloader(backup_cert_sector, file_size, new_version); //transfer it to sector zero
+                                }
+                            }
+                        } //else maybe next time more luck for the bootloader
+                    } //no bootloader update 
+                }
+                //if there is a newer version of ota-main...
+                if (ota_compare(ota_version,OTAVERSION)>0) { //set OTAVERSION when running make and match with github
+                    ota_get_hash(OTAREPO, ota_version, BOOTFILE, &signature);
+                    if (ota_verify_signature(&signature)) break; //signature file is not signed by our key, ABORT
+                    file_size=ota_get_file(OTAREPO,ota_version,BOOTFILE,BOOT0SECTOR);
+                    if (file_size<=0) continue; //something went wrong, but now boot0 is broken so start over
+                    if (ota_verify_hash(BOOT0SECTOR,&signature)) continue; //download failed
+                    ota_finalize_file(BOOT0SECTOR);
+                    break; //leads to boot=0 and starts self-updating/otaboot-app
+                } //ota code is up to date
+                ota_set_verify(1); //reject faked server only for user_repo
+                if (new_version) free(new_version);
+                new_version=ota_get_version(user_repo);
+                if (ota_compare(new_version,user_version)>0) { //can only upgrade
+                    UDPLGP("user_repo=\'%s\' new_version=\'%s\' user_file=\'%s\'\n",user_repo,new_version,user_file);
+                    if (!ota_get_hash(user_repo, new_version, user_file, &signature)) {
+                        file_size=ota_get_file(user_repo,new_version,user_file,BOOT0SECTOR);
+                        if (file_size<=0 || ota_verify_hash(BOOT0SECTOR,&signature)) continue; //something went wrong, but now boot0 is broken so start over
+                        ota_finalize_file(BOOT0SECTOR); //TODO return status and if wrong, continue
+                        ota_write_status(new_version); //we have been successful, hurray!
+                    } else break; //user did not supply a proper sig file or fake server -> return to boot0
+                } //nothing to update
+                break; //leads to boot=0 and starts updated user app
+#endif
             }
         }
     }
-    ESP_LOGI(TAG, "Total Write binary data length: %d", binary_file_length);
-    if (esp_http_client_is_complete_data_received(client) != true) {
-        ESP_LOGE(TAG, "Error in receiving complete file");
-        http_cleanup(client);
-        esp_ota_abort(update_handle);
-        task_fatal_error();
-    }
-
-    err = esp_ota_end(update_handle);
-    if (err != ESP_OK) {
-        if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
-            ESP_LOGE(TAG, "Image validation failed, image is corrupted");
-        } else {
-            ESP_LOGE(TAG, "esp_ota_end failed (%s)!", esp_err_to_name(err));
-        }
-        http_cleanup(client);
-        task_fatal_error();
-    }
-
-    err = esp_ota_set_boot_partition(update_partition);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
-        http_cleanup(client);
-        task_fatal_error();
-    }
-    ESP_LOGI(TAG, "Prepare to restart system in 30 seconds!");
-    vTaskDelay(3000);
-    esp_restart();
-    return ;
+    ota_reboot(); //boot0, either the user program or the otaboot app
+    vTaskDelete(NULL); //just for completeness sake, would never get till here
+*/
 }
 
 void app_main(void)
@@ -344,5 +303,6 @@ void app_main(void)
     esp_wifi_set_ps(WIFI_PS_NONE);
 #endif // CONFIG_EXAMPLE_CONNECT_WIFI
 
-    xTaskCreate(&ota_example_task, "ota_example_task", 8192, NULL, 5, NULL);
+//     xTaskCreate(&ota_example_task, "ota_example_task", 8192, NULL, 5, NULL);
+    xTaskCreate(&ota_task, "ota_task", 8192, NULL, 5, NULL); //TODO: adjust size and prio?
 }
