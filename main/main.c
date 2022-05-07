@@ -90,9 +90,7 @@ void ota_task(void *arg) {
 //     btl_version=ota_get_btl_version();
 // #endif
     if (ota_boot()) ota_write_status("0.0.0");  //we will have to get user code from scratch if running ota_boot
-/*    
     if ( !ota_load_user_app(&user_repo, &user_version, &user_file)) { //repo/file must be configured
-        if (!strcmp(user_repo,HAAREPO)) user_file=HAAFILE;
 #ifdef OTABOOT    
         if (ota_boot()) {
             new_version=ota_get_version(user_repo); //check if this repository exists at all
@@ -102,6 +100,7 @@ void ota_task(void *arg) {
             }
         }
 #endif
+/*    
         
         for (;;) { //escape from this loop by continue (try again) or break (boots into slot 0)
             UDPLGP("--- entering the loop\n");
@@ -238,10 +237,10 @@ void ota_task(void *arg) {
 #endif
             }
         }
+*/
     }
     ota_reboot(); //boot0, either the user program or the otaboot app
     vTaskDelete(NULL); //just for completeness sake, would never get till here
-*/
 }
 
 void app_main(void)

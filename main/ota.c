@@ -18,13 +18,26 @@
 #include "esp_wifi.h"
 #endif
 //===============================
-#define UDPLGP printf  //TODO: replace inline
 
 #include "ota.h"
+#define BUFFSIZE 1024
+
+static const char *TAG = "native_ota_library";
+/*an ota data write buffer ready to write to the flash*/
+static char http_buffer[BUFFSIZE + 1] = { 0 };
+extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
+extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
 bool userbeta=0;
 bool otabeta=0;
 // int8_t led=16;
+esp_http_client_handle_t client1=NULL, client2=NULL;
+
+static void __attribute__((noreturn)) task_fatal_error(void){
+    ESP_LOGE(TAG, "Exiting task due to fatal error...");
+    (void)vTaskDelete(NULL);
+    while (1) {;}
+}
 
 void  ota_active_sector() {
     UDPLGP("--- ota_active_sector: ");
@@ -101,22 +114,110 @@ void  ota_init() {
 // 	sntp_set_servers(servers, sizeof(servers) / sizeof(char*)); //Servers must be configured right after initialization
 
     
-//     wolfSSL_Init();
-// 
-//     ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
-//     if (!ctx) {
-//         //error
-//     }
+    esp_http_client_config_t config1 = {
+        .url = "https://" CONFIG_LCM_GITHOST "/",
+        .cert_pem = (char *)server_cert_pem_start,
+        .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
+        .keep_alive_enable = true,
+        .buffer_size    = 1024,
+        .buffer_size_tx = 1024,
+    };
+    client1 = esp_http_client_init(&config1);
+    if (client1 == NULL) {
+        ESP_LOGE(TAG, "Failed to initialise HTTP connection");
+        task_fatal_error();
+    }
+
     ota_active_sector();
 //     ota_set_verify(0);
-//     UDPLGP("--- DNS: ");
-//     ret = netconn_gethostbyname(HOST, &target_ip);
-//     while(ret) {
-//         UDPLGP("%d",ret);
-//         vTaskDelay(200);
-//         ret = netconn_gethostbyname(HOST, &target_ip);
+}
+
+int   ota_load_user_app(char * *repo, char * *version, char * *file) {
+    UDPLGP("--- ota_load_user_app\n");
+//     sysparam_status_t status;
+//     char *value;
+// 
+//     status = sysparam_get_string("ota_repo", &value);
+//     if (status == SYSPARAM_OK) {
+//         *repo=value;
+//     } else return -1;
+//     status = sysparam_get_string("ota_version", &value);
+//     if (status == SYSPARAM_OK) {
+//         *version=value;
+//     } else {
+//         *version=malloc(6);
+//         strcpy(*version,"0.0.0");
 //     }
-    UDPLGP("done!\n");
+//     status = sysparam_get_string("ota_file", &value);
+//     if (status == SYSPARAM_OK) {
+//         *file=value;
+//     } else return -1;
+    *repo="HomeACcessoryKid/LCM4ESP32";
+    *version="0.0.1";
+    *file="LCM4ESP32.bin";
+
+    UDPLGP("user_repo=\'%s\' user_version=\'%s\' user_file=\'%s\'\n",*repo,*version,*file);
+    return 0;
+}
+
+char* ota_get_version(char * repo) {
+    UDPLGP("--- ota_get_version\n");
+
+    char url[500];
+    char* version=NULL;
+    char prerelease[64]; 
+    esp_err_t err;
+    
+    sprintf(url,"https://%s/%s/releases/latest",CONFIG_LCM_GITHOST,repo);
+    esp_http_client_set_url(client1,url);
+    err = esp_http_client_open(client1, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client1);
+        task_fatal_error();
+    }
+    esp_http_client_fetch_headers(client1);
+    int code=esp_http_client_get_status_code(client1);
+    printf("code=%d\n",code);
+    if (code!=404) {
+        // this doesn't work because it doesn't actually flush the internal buffer
+        // int flushlen;
+        // printf("result %d of ",esp_http_client_flush_response(client1,&flushlen));
+        // printf("flushed %d\n",flushlen);
+        http_buffer[esp_http_client_read(client1, http_buffer, BUFFSIZE)]=0;
+        esp_http_client_set_redirection(client1);
+        esp_http_client_get_url(client1, url, 500);
+        char *found_ptr=strstr(url,"releases/tag/");
+        if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
+        version=malloc(strlen(found_ptr+13));
+        strcpy(version,found_ptr+13);
+    } else {
+        return "404";
+    }
+//     //find latest-pre-release if joined beta program
+//     bool OTAorBTL=!(strcmp(OTAREPO,repo)&&strcmp(BTLREPO,repo));
+//     if ( (userbeta && !OTAorBTL) || (otabeta && OTAorBTL)) {
+//         prerelease[63]=0;
+//         ret=ota_get_file_ex(repo,version,"latest-pre-release",0,(byte *)prerelease,63);
+//         if (ret>0) {
+//             prerelease[ret]=0; //TODO: UNTESTED make a final 0x0a and or 0x0d optional
+//             if (prerelease[ret-1]=='\n') {
+//                 prerelease[ret-1]=0;
+//                 if (prerelease[ret-2]=='\r') prerelease[ret-2]=0;                
+//             }
+//             free(version);
+//             version=malloc(strlen(prerelease)+1);
+//             strcpy(version,prerelease);
+//         }
+//     }
+//     
+//     if (ota_boot() && ota_compare(version,OTAVERSION)<0) { //this acts when setting up a new version
+//         free(version);
+//         version=malloc(strlen(OTAVERSION)+1);
+//         strcpy(version,OTAVERSION);
+//     }
+    UDPLGP("%s@version:\"%s\"\n",repo,version);
+    return version;
 }
 
 void  ota_write_status(char * version) {
@@ -136,34 +237,40 @@ int   ota_boot(void) {
     return 1-bootrom;
 }
 
+void  ota_temp_boot(void) {
+    UDPLGP("--- ota_temp_boot\n");
+    
+//     rboot_set_temp_rom(1);
+    vTaskDelay(20); //allows UDPLOG to flush
+    //TODO: this should force a boot from ota_1
+    esp_restart();
+}
+
+void  ota_reboot(void) {
+    UDPLGP("--- ota_reboot\n");
+
+//     if (ledblinkHandle) {
+//         vTaskDelete(ledblinkHandle);
+//         gpio_enable(led, GPIO_INPUT);
+//         gpio_set_pullup(led, 0, 0);
+//     }
+    vTaskDelay(20); //allows UDPLOG to flush
+    //TODO: this should force a boot from ota_0
+    esp_restart();
+}
+
 
 
 
 //===================================================
-#define BUFFSIZE 1024
-
-static const char *TAG = "native_ota_library";
-/*an ota data write buffer ready to write to the flash*/
-static char ota_write_data[BUFFSIZE + 1] = { 0 };
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
 #define OTA_URL_SIZE 256
+static char ota_write_data[BUFFSIZE + 1] = { 0 };
 
 static void http_cleanup(esp_http_client_handle_t client)
 {
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-}
-
-static void __attribute__((noreturn)) task_fatal_error(void)
-{
-    ESP_LOGE(TAG, "Exiting task due to fatal error...");
-    (void)vTaskDelete(NULL);
-
-    while (1) {
-        ;
-    }
 }
 
 static void infinite_loop(void)

@@ -4,6 +4,7 @@
 
 // void ota_example_task(void *pvParameter);
 
+#define UDPLGP printf  //TODO: replace inline
 
 // #ifndef OTAVERSION
 //  #error You must set OTAVERSION=x.y.z of the ota code to match github version tag x.y.z

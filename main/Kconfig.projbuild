@@ -4,7 +4,7 @@ menu "LCM4ESP32 Configuration"
         string "User Repo"
         default "HomeACcessorykid/lcmdemo"
         help
-            URL of server which hosts the firmware image.
+            name of the repo with the user firmware image.
 
     config EXAMPLE_SKIP_VERSION_CHECK
         bool "Skip firmware version check"
@@ -17,5 +17,17 @@ menu "LCM4ESP32 Configuration"
         default 5000
         help
             Maximum time for reception
+
+    config LCM_GITHOST
+        string "Host name of GIT release server"
+        default "github.com"
+        help
+            hostname of server which hosts the images.
+
+    config LCM_GITREPO
+        string "User Repo"
+        default "HomeACcessorykid/LCM4ESP32"
+        help
+            name of the repo with the LCM firmware images.
 
 endmenu
