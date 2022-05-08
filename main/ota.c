@@ -75,6 +75,13 @@ void  ota_active_sector() {
 //     }
     UDPLGP("0x%x\n",active_cert_sector);
 }
+char location[600];
+esp_err_t ota_event_handler(esp_http_client_event_t *evt){
+    if (evt->event_id==HTTP_EVENT_ON_HEADER && !strcasecmp(evt->header_key,"location")) {
+        strcpy(location,evt->header_value);
+    }
+    return ESP_OK;
+}
 
 void  ota_init() {
     UDPLGP("--- ota_init\n");
@@ -121,6 +128,7 @@ void  ota_init() {
         .keep_alive_enable = true,
         .buffer_size    = 1024,
         .buffer_size_tx = 1024,
+        .event_handler = ota_event_handler,
     };
     client1 = esp_http_client_init(&config1);
     if (client1 == NULL) {
@@ -152,24 +160,32 @@ int   ota_load_user_app(char * *repo, char * *version, char * *file) {
 //     if (status == SYSPARAM_OK) {
 //         *file=value;
 //     } else return -1;
-    *repo="HomeACcessoryKid/LCM4ESP32";
+    *repo="HomeACcessoryKid/life-cycle-manager";
     *version="0.0.1";
-    *file="LCM4ESP32.bin";
+    *file="otaboot.bin";
 
     UDPLGP("user_repo=\'%s\' user_version=\'%s\' user_file=\'%s\'\n",*repo,*version,*file);
     return 0;
 }
 
-char* ota_get_version(char * repo) {
-    UDPLGP("--- ota_get_version\n");
+int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte * buffer, int bufsz) { //number of bytes
+    UDPLGP("--- ota_get_file_ex\n");
 
-    char url[500];
-    char* version=NULL;
-    char prerelease[64]; 
+    char* found_ptr=NULL;
+    bool emergency=(strcmp(version,EMERGENCY))?0:1;
+    int data_read=0;
+    int binary_file_length=0;
     esp_err_t err;
     
-    sprintf(url,"https://%s/%s/releases/latest",CONFIG_LCM_GITHOST,repo);
-    esp_http_client_set_url(client1,url);
+    if (sector==0 && buffer==NULL) return -5; //needs to be either a sector or a signature
+    
+    if (!emergency) { //if not emergency, find the redirection done by GitHub
+        snprintf(location,600,"https://%s/%s/releases/download/%s/%s",CONFIG_LCM_GITHOST,repo,version,file);
+        esp_http_client_set_url(client1,location);
+    } else { //emergency mode, repo is expected to have the format "not.github.com/somewhere/"
+//         esp_http_client_set_url(client,);
+    } //loaded the right url
+    printf("URL1=%s\n",location);
     err = esp_http_client_open(client1, 0);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
@@ -178,19 +194,105 @@ char* ota_get_version(char * repo) {
     }
     esp_http_client_fetch_headers(client1);
     int code=esp_http_client_get_status_code(client1);
+    printf("code1=%d\n",code);
+    
+    if (code==302) {
+        http_buffer[esp_http_client_read(client1, http_buffer, BUFFSIZE)]=0;
+        printf("flushed: %s\n",http_buffer);
+        //now setup client2 with location as url
+        if (client2==NULL) {
+            esp_http_client_config_t config2 = {
+                .url = location,
+                .cert_pem = (char *)server_cert_pem_start,
+                .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
+                .keep_alive_enable = true,
+                .buffer_size    = 1024,
+                .buffer_size_tx = 1024,
+            };
+            client2 = esp_http_client_init(&config2);
+            if (client2 == NULL) {
+                ESP_LOGE(TAG, "Failed to initialise HTTP connection");
+                task_fatal_error();
+            }
+        } else {
+            esp_http_client_set_url(client2,location);
+        } //now url is set for client2
+        printf("URL2=%s\n",location);
+        err = esp_http_client_open(client2, 0);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
+            esp_http_client_cleanup(client2);
+            task_fatal_error();
+        }
+        esp_http_client_fetch_headers(client2);
+        int code=esp_http_client_get_status_code(client2);
+        printf("code2=%d\n",code);
+        if (sector) {
+            //TODO write to flash part
+        } else {//buffer
+            while (1) {
+                data_read = esp_http_client_read(client2, http_buffer, BUFFSIZE);
+                if (data_read < 0) {
+                    ESP_LOGE(TAG, "Error: SSL data read error");
+                    esp_http_client_cleanup(client2);
+                    task_fatal_error();
+                } else if (data_read > 0) {
+                    memcpy(buffer,http_buffer,data_read);
+                    binary_file_length += data_read;
+                } else if (data_read == 0) {
+                    // As esp_http_client_read never returns negative error code, we rely on
+                    // `errno` to check for underlying transport connectivity closure if any
+                    if (errno == ECONNRESET || errno == ENOTCONN) {
+                        ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
+                        break;
+                    }
+                    if (esp_http_client_is_complete_data_received(client2) == true) {
+                        printf("Transfer Complete: ");
+                        break;
+                    }
+                }
+            }
+            printf("data length=%d buffer=%02x%02x %02x%02x ... %02x%02x %02x%02x\n",binary_file_length,
+            buffer[0],buffer[1],buffer[2],buffer[3],buffer[binary_file_length-4],
+            buffer[binary_file_length-3],buffer[binary_file_length-2],buffer[binary_file_length-1]);
+            if (esp_http_client_is_complete_data_received(client2) != true) {
+                ESP_LOGE(TAG, "Error in receiving complete file");
+                return -5; //TODO check values
+            }
+        }
+    }
+    return binary_file_length;
+}
+
+char* ota_get_version(char * repo) {
+    UDPLGP("--- ota_get_version\n");
+
+    char* version=NULL;
+    char prerelease[64]; 
+    esp_err_t err;
+    
+    snprintf(location,600,"https://%s/%s/releases/latest",CONFIG_LCM_GITHOST,repo);
+    esp_http_client_set_url(client1,location);
+    err = esp_http_client_open(client1, 0);
+    if (err != ESP_OK) { //TODO make this a macro
+        ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client1);
+        task_fatal_error();
+    }
+    esp_http_client_fetch_headers(client1);
+    int code=esp_http_client_get_status_code(client1);
     printf("code=%d\n",code);
-    if (code!=404) {
+    if (code==302) {
         // this doesn't work because it doesn't actually flush the internal buffer
         // int flushlen;
         // printf("result %d of ",esp_http_client_flush_response(client1,&flushlen));
         // printf("flushed %d\n",flushlen);
         http_buffer[esp_http_client_read(client1, http_buffer, BUFFSIZE)]=0;
-        esp_http_client_set_redirection(client1);
-        esp_http_client_get_url(client1, url, 500);
-        char *found_ptr=strstr(url,"releases/tag/");
+        char *found_ptr=strstr(location,"releases/tag/");
         if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
         version=malloc(strlen(found_ptr+13));
         strcpy(version,found_ptr+13);
+        location[0]=0;
     } else {
         return "404";
     }
@@ -218,6 +320,26 @@ char* ota_get_version(char * repo) {
 //     }
     UDPLGP("%s@version:\"%s\"\n",repo,version);
     return version;
+}
+
+
+int   ota_get_hash(char * repo, char * version, char * file, signature_t* signature) {
+    UDPLGP("--- ota_get_hash\n");
+    int ret;
+    byte buffer[HASHSIZE+4+SIGNSIZE];
+    char * signame=malloc(strlen(file)+5);
+    strcpy(signame,file);
+    strcat(signame,".sig");
+    memset(signature->hash,0,HASHSIZE);
+    memset(signature->sign,0,SIGNSIZE);
+    ret=ota_get_file_ex(repo,version,signame,0,buffer,HASHSIZE+4+SIGNSIZE);
+    free(signame);
+    if (ret<0) return ret;
+    memcpy(signature->hash,buffer,HASHSIZE);
+    signature->size=((buffer[HASHSIZE]*256 + buffer[HASHSIZE+1])*256 + buffer[HASHSIZE+2])*256 + buffer[HASHSIZE+3];
+    if (ret>HASHSIZE+4) memcpy(signature->sign,buffer+HASHSIZE+4,SIGNSIZE);
+
+    return 0;
 }
 
 void  ota_write_status(char * version) {

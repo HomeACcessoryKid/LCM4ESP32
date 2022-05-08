@@ -61,34 +61,15 @@ void ota_task(void *arg) {
     char*  new_version=NULL;
     char*  ota_version=NULL;
 //    char*  lcm_version=NULL;
-#ifndef OTABOOT    
-    char*  btl_version=NULL;
-#endif
     signature_t signature;
     extern int active_cert_sector;
     extern int backup_cert_sector;
     int file_size; //32bit
-#ifdef OTABOOT    
-    int have_private_key=0;
-#endif
     int keyid,foundkey=0;
     char keyname[KEYNAMELEN];
     ota_init();
     
 //     file_size=ota_get_pubkey(active_cert_sector);
-//     
-// #ifdef OTABOOT    
-//     if (!ota_get_privkey()) { //have private key
-//         have_private_key=1;
-//         UDPLGP("have private key\n");
-//         if (ota_verify_pubkey()) {
-//             ota_sign(active_cert_sector,file_size, &signature, "public-1.key");//use this (old) privkey to sign the (new) pubkey
-//             vTaskDelete(NULL); //upload the signature out of band to github and flash the new private key to backupsector
-//         }
-//     }
-// #else
-//     btl_version=ota_get_btl_version();
-// #endif
     if (ota_boot()) ota_write_status("0.0.0");  //we will have to get user code from scratch if running ota_boot
     if ( !ota_load_user_app(&user_repo, &user_version, &user_file)) { //repo/file must be configured
 #ifdef OTABOOT    
@@ -100,7 +81,6 @@ void ota_task(void *arg) {
             }
         }
 #endif
-/*    
         
         for (;;) { //escape from this loop by continue (try again) or break (boots into slot 0)
             UDPLGP("--- entering the loop\n");
@@ -111,21 +91,15 @@ void ota_task(void *arg) {
             
             //do we still have a valid internet connexion? dns resolve github... should not be private IP
             
-            ota_get_pubkey(active_cert_sector); //in case the LCM update is in a cycle
+//             ota_get_pubkey(active_cert_sector); //in case the LCM update is in a cycle
             
-            ota_set_verify(0); //should work even without certificates
-            //if (lcm_version) free(lcm_version);
+//             ota_set_verify(0); //should work even without certificates
             if (ota_version) free(ota_version);
             ota_version=ota_get_version(OTAREPO);
             if (ota_get_hash(OTAREPO, ota_version, CERTFILE, &signature)) { //no certs.sector.sig exists yet on server
-#ifdef OTABOOT    
-                if (have_private_key) {
-                    ota_sign(active_cert_sector,SECTORSIZE, &signature, CERTFILE); //reports to console
-                    vTaskDelete(NULL); //upload the signature out of band to github and start again
-                } else
-#endif
                     continue; //loop and try again later
             }
+/*    
             if (ota_verify_hash(active_cert_sector,&signature)) { //seems we need to download certificates
                 if (ota_verify_signature(&signature)) { //maybe an update on the public key
                     keyid=1;
@@ -155,27 +129,12 @@ void ota_task(void *arg) {
 #ifdef OTABOOT    
                 //take care our boot code gets a signature by loading it in boot1sector just for this purpose
                 if (ota_get_hash(OTAREPO, ota_version, BOOTFILE, &signature)) { //no signature yet
-                    if (have_private_key) {
-                        file_size=ota_get_file(OTAREPO,ota_version,BOOTFILE,BOOT1SECTOR);
-                        if (file_size<=0) continue; //try again later
-                        ota_finalize_file(BOOT1SECTOR);
-                        ota_sign(BOOT1SECTOR,file_size, &signature, BOOTFILE); //reports to console
-                        vTaskDelete(NULL); //upload the signature out of band to github and start again
-                    }
                 }
                 //switching over to a new repository, called LCM life-cycle-manager
                 //lcm_version=ota_get_version(LCMREPO);
                 //now get the latest ota main software in boot sector 1
                 if (ota_get_hash(OTAREPO, ota_version, MAINFILE, &signature)) { //no signature yet
-                    if (have_private_key) {
-                        file_size=ota_get_file(OTAREPO,ota_version,MAINFILE,BOOT1SECTOR);
-                        if (file_size<=0) continue; //try again later
-                        ota_finalize_file(BOOT1SECTOR);
-                        ota_sign(BOOT1SECTOR,file_size, &signature, MAINFILE); //reports to console
-                        vTaskDelete(NULL); //upload the signature out of band to github and start again
-                    } else {
                         continue; //loop and try again later
-                    }
                 } else { //we have a signature, maybe also the main file?
                     if (ota_verify_signature(&signature)) continue; //signature file is not signed by our key, ABORT
                     if (ota_verify_hash(BOOT1SECTOR,&signature)) { //not yet downloaded
@@ -236,8 +195,8 @@ void ota_task(void *arg) {
                 break; //leads to boot=0 and starts updated user app
 #endif
             }
-        }
 */
+        }
     }
     ota_reboot(); //boot0, either the user program or the otaboot app
     vTaskDelete(NULL); //just for completeness sake, would never get till here

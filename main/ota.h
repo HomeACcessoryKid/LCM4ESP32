@@ -9,15 +9,10 @@
 // #ifndef OTAVERSION
 //  #error You must set OTAVERSION=x.y.z of the ota code to match github version tag x.y.z
 // #endif
-#define OTAREPO  "HomeACcessoryKid/life-cycle-manager"
-//#define LCMREPO  "HomeACcessoryKid/life-cycle-manager"
-#define BTLREPO  "HomeACcessoryKid/rboot4lcm"
-#define BTLFILE "rboot.bin"
+#define OTAREPO  CONFIG_LCM_GITREPO
 #define MAINFILE "otamain.bin"
 #define BOOTFILE "otaboot.bin"
 #define CERTFILE "certs.sector"
-#define HAAREPO "RavenSystem/haa"
-#define HAAFILE "haa_lcm.bin"
 #define HOLDOFF_MULTIPLIER 20   //more like 20  -> 20s,400 (~6min),8000 (~2h),160000 (~2days)
 #define HOLDOFF_MAX 604800      //more like 604800 (1 week)
 #define BLINKDELAY 250
@@ -29,15 +24,6 @@
 #define SYSPARAMSECTOR 0xF7000
 #define BOOT0SECTOR 0x02000
 #define BOOT1SECTOR 0x8D000 //must match the program1.ld value!!
-#define HOST "github.com"
-#define HTTPS_PORT 443
-#define HTTP_PORT   80
-#define FAILED "failed\n"
-#define REQUESTHEAD "GET /"
-#define REQUESTTAIL " HTTP/1.1\r\nHost: "
-#define CRLFCRLF "\r\n\r\n"
-#define RECV_BUF_LEN 1025  // current length of amazon URL 724
-#define RANGE "\r\nRange: bytes="
 #define MAXVERSIONLEN 16
 #define SNTP_SERVERS 	"0.pool.ntp.org", "1.pool.ntp.org", "2.pool.ntp.org", "3.pool.ntp.org"
 
