@@ -60,16 +60,13 @@ void ota_task(void *arg) {
     char* user_file=NULL;
     char*  new_version=NULL;
     char*  ota_version=NULL;
-//    char*  lcm_version=NULL;
     signature_t signature;
-    extern int active_cert_sector;
-    extern int backup_cert_sector;
     int file_size; //32bit
     int keyid,foundkey=0;
     char keyname[KEYNAMELEN];
     ota_init();
     
-//     file_size=ota_get_pubkey(active_cert_sector);
+    file_size=ota_get_pubkey(active_cert_sector);
     if (ota_boot()) ota_write_status("0.0.0");  //we will have to get user code from scratch if running ota_boot
     if ( !ota_load_user_app(&user_repo, &user_version, &user_file)) { //repo/file must be configured
 #ifdef OTABOOT    
@@ -91,7 +88,7 @@ void ota_task(void *arg) {
             
             //do we still have a valid internet connexion? dns resolve github... should not be private IP
             
-//             ota_get_pubkey(active_cert_sector); //in case the LCM update is in a cycle
+            ota_get_pubkey(active_cert_sector); //in case the LCM update is in a cycle
             
 //             ota_set_verify(0); //should work even without certificates
             if (ota_version) free(ota_version);
@@ -99,8 +96,8 @@ void ota_task(void *arg) {
             if (ota_get_hash(OTAREPO, ota_version, CERTFILE, &signature)) { //no certs.sector.sig exists yet on server
                     continue; //loop and try again later
             }
-/*    
             if (ota_verify_hash(active_cert_sector,&signature)) { //seems we need to download certificates
+/*    
                 if (ota_verify_signature(&signature)) { //maybe an update on the public key
                     keyid=1;
                     while (sprintf(keyname,KEYNAME,keyid) , !ota_get_hash(OTAREPO, ota_version, keyname, &signature)) {
@@ -119,11 +116,13 @@ void ota_task(void *arg) {
                     }
                     if (!foundkey) break; //leads to boot=0
                 }
+*/
                 ota_get_file(OTAREPO,ota_version,CERTFILE,backup_cert_sector); //CERTFILE=public-1.key
                 if (ota_verify_hash(backup_cert_sector,&signature)) break; //leads to boot=0
-                ota_swap_cert_sector();
+//                 ota_swap_cert_sector();
                 ota_get_pubkey(active_cert_sector);
             } //certificates are good now
+/*
             
             if (ota_boot()) { //running the ota-boot software now
 #ifdef OTABOOT    

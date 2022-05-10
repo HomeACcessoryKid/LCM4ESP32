@@ -20,14 +20,14 @@
 //===============================
 
 #include "ota.h"
+#include "certs.h"
 #define BUFFSIZE 1024
 
 static const char *TAG = "native_ota_library";
 /*an ota data write buffer ready to write to the flash*/
 static char http_buffer[BUFFSIZE + 1] = { 0 };
-extern const uint8_t server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
-extern const uint8_t server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
 
+char sectorlabel[][10]={"zero","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
 bool userbeta=0;
 bool otabeta=0;
 // int8_t led=16;
@@ -41,26 +41,26 @@ static void __attribute__((noreturn)) task_fatal_error(void){
 
 void  ota_active_sector() {
     UDPLGP("--- ota_active_sector: ");
-    extern int active_cert_sector;
-    extern int backup_cert_sector;
     // set active_cert_sector
     // first byte of the sector is its state:
     // 0xff backup being evaluated
     // 0x30 active sector
     // 0x00 deactivated
-//     byte fourbyte[4];
+    byte fourbyte[4];
     active_cert_sector=HIGHERCERTSECTOR;
     backup_cert_sector=LOWERCERTSECTOR;
-//     if (!spiflash_read(active_cert_sector, (byte *)fourbyte, 4)) { //get first 4 active
-//         UDPLGP("error reading flash\n");
-//     } // if OTHER  vvvvvv sector active
-//     if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
-//         active_cert_sector=LOWERCERTSECTOR;
-//         backup_cert_sector=HIGHERCERTSECTOR;
-//         if (!spiflash_read(active_cert_sector, (byte *)fourbyte, 4)) {
-//             UDPLGP("error reading flash\n");
-//         }
-//         if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
+    if (esp_partition_read(esp_partition_find_first(0x65,0x18,sectorlabel[active_cert_sector]),
+                                                    0,(byte *)fourbyte,4)!=ESP_OK) {
+        UDPLGP("error reading flash\n");
+    } // if OTHER  vvvvvv sector active
+    if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
+        active_cert_sector=LOWERCERTSECTOR;
+        backup_cert_sector=HIGHERCERTSECTOR;
+        if (esp_partition_read(esp_partition_find_first(0x65,0x18,sectorlabel[active_cert_sector]),
+                                                        0,(byte *)fourbyte,4)!=ESP_OK) {
+            UDPLGP("error reading flash\n");
+        }
+        if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
 // #ifdef OTABOOT
 //             #include "certs.h"
 //             active_cert_sector=HIGHERCERTSECTOR;
@@ -68,13 +68,15 @@ void  ota_active_sector() {
 //             spiflash_erase_sector(active_cert_sector); //just in case
 //             spiflash_write(active_cert_sector, certs_sector, certs_sector_len);
 // #else
-//             active_cert_sector=0;
-//             backup_cert_sector=0;
+            active_cert_sector=0;
+            backup_cert_sector=0;
 // #endif
-//         }
-//     }
-    UDPLGP("0x%x\n",active_cert_sector);
+        }
+    }
+    
+    UDPLGP("%s\n",sectorlabel[active_cert_sector]);
 }
+
 char location[600];
 esp_err_t ota_event_handler(esp_http_client_event_t *evt){
     if (evt->event_id==HTTP_EVENT_ON_HEADER && !strcasecmp(evt->header_key,"location")) {
@@ -120,10 +122,9 @@ void  ota_init() {
 // 	sntp_initialize(NULL);
 // 	sntp_set_servers(servers, sizeof(servers) / sizeof(char*)); //Servers must be configured right after initialization
 
-    
     esp_http_client_config_t config1 = {
         .url = "https://" CONFIG_LCM_GITHOST "/",
-        .cert_pem = (char *)server_cert_pem_start,
+        .cert_pem = certs,
         .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
         .keep_alive_enable = true,
         .buffer_size    = 1024,
@@ -174,8 +175,9 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     char* found_ptr=NULL;
     bool emergency=(strcmp(version,EMERGENCY))?0:1;
     int data_read=0;
-    int binary_file_length=0;
+    int collected=0;
     esp_err_t err;
+    esp_ota_handle_t handle=0;
     
     if (sector==0 && buffer==NULL) return -5; //needs to be either a sector or a signature
     
@@ -198,12 +200,12 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     
     if (code==302) {
         http_buffer[esp_http_client_read(client1, http_buffer, BUFFSIZE)]=0;
-        printf("flushed: %s\n",http_buffer);
+        if (http_buffer[0]) printf("flushed: %s\n",http_buffer);
         //now setup client2 with location as url
         if (client2==NULL) {
             esp_http_client_config_t config2 = {
                 .url = location,
-                .cert_pem = (char *)server_cert_pem_start,
+                .cert_pem = certs,
                 .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
                 .keep_alive_enable = true,
                 .buffer_size    = 1024,
@@ -227,41 +229,62 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         esp_http_client_fetch_headers(client2);
         int code=esp_http_client_get_status_code(client2);
         printf("code2=%d\n",code);
-        if (sector) {
-            //TODO write to flash part
-        } else {//buffer
-            while (1) {
-                data_read = esp_http_client_read(client2, http_buffer, BUFFSIZE);
-                if (data_read < 0) {
-                    ESP_LOGE(TAG, "Error: SSL data read error");
-                    esp_http_client_cleanup(client2);
-                    task_fatal_error();
-                } else if (data_read > 0) {
-                    memcpy(buffer,http_buffer,data_read);
-                    binary_file_length += data_read;
-                } else if (data_read == 0) {
-                    // As esp_http_client_read never returns negative error code, we rely on
-                    // `errno` to check for underlying transport connectivity closure if any
-                    if (errno == ECONNRESET || errno == ENOTCONN) {
-                        ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
-                        break;
+        while (1) {
+            data_read = esp_http_client_read(client2, http_buffer, BUFFSIZE);
+            if (data_read < 0) {
+                ESP_LOGE(TAG, "Error: SSL data read error");
+                esp_http_client_cleanup(client2);
+                task_fatal_error();
+            } else if (data_read > 0) {
+                if (sector>2) {//ota partitions
+                    if (!collected) {
+                        esp_ota_begin(esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sector]),
+                        OTA_WITH_SEQUENTIAL_WRITES, &handle);
                     }
-                    if (esp_http_client_is_complete_data_received(client2) == true) {
-                        printf("Transfer Complete: ");
-                        break;
+                    esp_ota_write(handle,(const void *)http_buffer,data_read);
+                } else if (sector) {//cert_sectors
+                    if (!collected) { //TODO add first byte concept
+                        esp_partition_erase_range(esp_partition_find_first(0x65,0x18,sectorlabel[sector]),0,0x1000);
                     }
+                    esp_partition_write(esp_partition_find_first(0x65,0x18,sectorlabel[sector]),collected,http_buffer,data_read);
+                } else {//buffer
+                    memcpy(buffer+collected,http_buffer,data_read);
+                }
+                collected+=data_read;
+            } else if (data_read == 0) {
+                // As esp_http_client_read never returns negative error code, we rely on
+                // `errno` to check for underlying transport connectivity closure if any
+                if (errno == ECONNRESET || errno == ENOTCONN) {
+                    ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
+                    break;
+                }
+                if (esp_http_client_is_complete_data_received(client2) == true) {
+                    printf("Transfer Complete: ");
+                    break;
                 }
             }
-            printf("data length=%d buffer=%02x%02x %02x%02x ... %02x%02x %02x%02x\n",binary_file_length,
-            buffer[0],buffer[1],buffer[2],buffer[3],buffer[binary_file_length-4],
-            buffer[binary_file_length-3],buffer[binary_file_length-2],buffer[binary_file_length-1]);
-            if (esp_http_client_is_complete_data_received(client2) != true) {
-                ESP_LOGE(TAG, "Error in receiving complete file");
-                return -5; //TODO check values
-            }
+        }
+        if (sector>2) {//ota partitions
+            esp_ota_end(handle);
+            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
+        } else if (sector) {//cert_sectors
+            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
+        } else {//buffer
+            printf("data length=%d, buffer=%02x%02x %02x%02x ... %02x%02x %02x%02x\n",collected,
+            buffer[0],buffer[1],buffer[2],buffer[3],buffer[collected-4],
+            buffer[collected-3],buffer[collected-2],buffer[collected-1]);
+        }
+        if (esp_http_client_is_complete_data_received(client2) != true) {
+            ESP_LOGE(TAG, "Error in receiving complete file");
+            return -5; //TODO check values
         }
     }
-    return binary_file_length;
+    return collected;
+}
+
+int   ota_get_file(char * repo, char * version, char * file, int sector) { //number of bytes
+    UDPLGP("--- ota_get_file\n");
+    return ota_get_file_ex(repo,version,file,sector,NULL,0);
 }
 
 char* ota_get_version(char * repo) {
@@ -322,6 +345,30 @@ char* ota_get_version(char * repo) {
     return version;
 }
 
+int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, report filesize
+    UDPLGP("--- ota_get_pubkey\n");
+    
+    byte buf[PKEYSIZE];
+    byte * buffer=buf;
+    int length,ret=0;
+    //load public key as produced by openssl
+    if (esp_partition_read(esp_partition_find_first(0x65,0x18,sectorlabel[sector]),
+                                                    0,(byte *)buffer, PKEYSIZE)!=ESP_OK) {
+        UDPLGP("error reading flash\n");    return -1;
+    }
+    //do not test the first byte since else the key-update routine will not be able to collect a key
+    if (buffer[ 1]!=0x76 || buffer[ 2]!=0x30 || buffer[ 3]!=0x10) return -2; //not a valid keyformat
+    if (buffer[20]!=0x03 || buffer[21]!=0x62 || buffer[22]!=0x00) return -2; //not a valid keyformat
+    length=97;
+    
+    int idx; for (idx=0;idx<length;idx++) printf(" %02x",buffer[idx+23]);
+//     wc_ecc_init(&pubecckey);
+//     ret=wc_ecc_import_x963_ex(buffer+23,length,&pubecckey,ECC_SECP384R1);
+    printf("\n");
+    UDPLGP("ret: %d\n",ret);
+
+    if (!ret)return PKEYSIZE; else return ret;
+}
 
 int   ota_get_hash(char * repo, char * version, char * file, signature_t* signature) {
     UDPLGP("--- ota_get_hash\n");
@@ -340,6 +387,21 @@ int   ota_get_hash(char * repo, char * version, char * file, signature_t* signat
     if (ret>HASHSIZE+4) memcpy(signature->sign,buffer+HASHSIZE+4,SIGNSIZE);
 
     return 0;
+}
+
+int   ota_verify_hash(int address, signature_t* signature) {
+    UDPLGP("--- ota_verify_hash\n");
+    
+//     byte hash[HASHSIZE];
+//     ota_hash(address, signature->size, hash, file_first_byte[0]);
+//     //int i;
+//     //printf("signhash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",signature->hash[i]); printf("\n");
+//     //printf("calchash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",           hash[i]); printf("\n");
+//     
+//     if (memcmp(hash,signature->hash,HASHSIZE)) ota_hash(address, signature->size, hash, 0xff);
+//     
+//     return memcmp(hash,signature->hash,HASHSIZE);
+    return 1;
 }
 
 void  ota_write_status(char * version) {
@@ -427,7 +489,7 @@ void ota_example_task(void *pvParameter)
 
     esp_http_client_config_t config = {
         .url = "https://github.com/HomeACcessoryKid/LCM4ESP32/releases/latest",
-        .cert_pem = (char *)server_cert_pem_start,
+//         .cert_pem = (char *)server_cert_pem_start,
         .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
         .keep_alive_enable = true,
         .buffer_size    = 1024,

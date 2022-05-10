@@ -19,11 +19,12 @@
 #define EMERGENCY "emergency"
 
 #define SECTORSIZE 4096
-#define HIGHERCERTSECTOR 0xFA000
-#define LOWERCERTSECTOR 0xF9000
+#define HIGHERCERTSECTOR 2
+#define LOWERCERTSECTOR 1
 #define SYSPARAMSECTOR 0xF7000
-#define BOOT0SECTOR 0x02000
-#define BOOT1SECTOR 0x8D000 //must match the program1.ld value!!
+#define BOOT0SECTOR 3
+#define BOOT1SECTOR 4
+
 #define MAXVERSIONLEN 16
 #define SNTP_SERVERS 	"0.pool.ntp.org", "1.pool.ntp.org", "2.pool.ntp.org", "3.pool.ntp.org"
 
