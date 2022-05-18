@@ -23,6 +23,7 @@
 #include "certs.h"
 #include "mbedtls/sha512.h" //contains sha384 support
 #define BUFFSIZE 1024
+#define NAME2SECTOR(sectorname) esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sectorname])
 
 static const char *TAG = "native_ota_library";
 /*an ota data write buffer ready to write to the flash*/
@@ -50,14 +51,14 @@ void  ota_active_sector() {
     byte fourbyte[4];
     active_cert_sector=HIGHERCERTSECTOR;
     backup_cert_sector=LOWERCERTSECTOR;
-    if (esp_partition_read(esp_partition_find_first(0x65,0x18,sectorlabel[active_cert_sector]),
+    if (esp_partition_read(NAME2SECTOR(active_cert_sector),
                                                     0,(byte *)fourbyte,4)!=ESP_OK) {
         UDPLGP("error reading flash\n");
     } // if OTHER  vvvvvv sector active
     if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
         active_cert_sector=LOWERCERTSECTOR;
         backup_cert_sector=HIGHERCERTSECTOR;
-        if (esp_partition_read(esp_partition_find_first(0x65,0x18,sectorlabel[active_cert_sector]),
+        if (esp_partition_read(NAME2SECTOR(active_cert_sector),
                                                         0,(byte *)fourbyte,4)!=ESP_OK) {
             UDPLGP("error reading flash\n");
         }
@@ -239,15 +240,15 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             } else if (data_read > 0) {
                 if (sector>2) {//ota partitions
                     if (!collected) {
-                        esp_ota_begin(esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sector]),
+                        esp_ota_begin(NAME2SECTOR(sector),
                         OTA_WITH_SEQUENTIAL_WRITES, &handle);
                     }
                     esp_ota_write(handle,(const void *)http_buffer,data_read);
                 } else if (sector) {//cert_sectors
                     if (!collected) { //TODO add first byte concept
-                        esp_partition_erase_range(esp_partition_find_first(0x65,0x18,sectorlabel[sector]),0,0x1000);
+                        esp_partition_erase_range(NAME2SECTOR(sector),0,0x1000);
                     }
-                    esp_partition_write(esp_partition_find_first(0x65,0x18,sectorlabel[sector]),collected,http_buffer,data_read);
+                    esp_partition_write(NAME2SECTOR(sector),collected,http_buffer,data_read);
                 } else {//buffer
                     memcpy(buffer+collected,http_buffer,data_read);
                 }
@@ -353,7 +354,7 @@ int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, 
     byte * buffer=buf;
     int length,ret=0;
     //load public key as produced by openssl
-    if (esp_partition_read(esp_partition_find_first(0x65,0x18,sectorlabel[sector]),
+    if (esp_partition_read(NAME2SECTOR(sector),
                                                     0,(byte *)buffer, PKEYSIZE)!=ESP_OK) {
         UDPLGP("error reading flash\n");    return -1;
     }
@@ -383,7 +384,7 @@ void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
     //printf("bytes: ");
     for (bytes=0;bytes<filesize-1024;bytes+=1024) {
         //printf("%d ",bytes);
-        if (esp_partition_read(esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[start_sector]),
+        if (esp_partition_read(NAME2SECTOR(start_sector),
                                                         bytes,(byte *)buffer,1024)!=ESP_OK) {
             UDPLGP("error reading flash\n");   break;
         }
@@ -391,7 +392,7 @@ void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
         mbedtls_sha512_update_ret(&sha, buffer, 1024);
     }
     //printf("%d\n",bytes);
-    if (esp_partition_read(esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[start_sector]),
+    if (esp_partition_read(NAME2SECTOR(start_sector),
                                                         bytes,(byte *)buffer,filesize-bytes)!=ESP_OK) {
         UDPLGP("error reading flash @ %d for %d bytes\n",start_sector+bytes,filesize-bytes);
     }
