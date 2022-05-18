@@ -21,6 +21,7 @@
 
 #include "ota.h"
 #include "certs.h"
+#include "mbedtls/sha512.h" //contains sha384 support
 #define BUFFSIZE 1024
 
 static const char *TAG = "native_ota_library";
@@ -370,6 +371,37 @@ int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, 
     if (!ret)return PKEYSIZE; else return ret;
 }
 
+void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
+    UDPLGP("--- ota_hash\n");
+    
+    int bytes;
+    byte buffer[1024];
+    mbedtls_sha512_context sha;
+    
+    mbedtls_sha512_init(&sha);
+    mbedtls_sha512_starts_ret(&sha,1); //SHA384
+    //printf("bytes: ");
+    for (bytes=0;bytes<filesize-1024;bytes+=1024) {
+        //printf("%d ",bytes);
+        if (esp_partition_read(esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[start_sector]),
+                                                        bytes,(byte *)buffer,1024)!=ESP_OK) {
+            UDPLGP("error reading flash\n");   break;
+        }
+        if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
+        mbedtls_sha512_update_ret(&sha, buffer, 1024);
+    }
+    //printf("%d\n",bytes);
+    if (esp_partition_read(esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[start_sector]),
+                                                        bytes,(byte *)buffer,filesize-bytes)!=ESP_OK) {
+        UDPLGP("error reading flash @ %d for %d bytes\n",start_sector+bytes,filesize-bytes);
+    }
+    if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
+    //printf("filesize %d\n",filesize);
+    mbedtls_sha512_update_ret(&sha, buffer, filesize-bytes);
+    mbedtls_sha512_finish_ret(&sha, hash);
+    mbedtls_sha512_free(&sha);
+}
+
 int   ota_get_hash(char * repo, char * version, char * file, signature_t* signature) {
     UDPLGP("--- ota_get_hash\n");
     int ret;
@@ -392,16 +424,26 @@ int   ota_get_hash(char * repo, char * version, char * file, signature_t* signat
 int   ota_verify_hash(int address, signature_t* signature) {
     UDPLGP("--- ota_verify_hash\n");
     
-//     byte hash[HASHSIZE];
-//     ota_hash(address, signature->size, hash, file_first_byte[0]);
-//     //int i;
-//     //printf("signhash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",signature->hash[i]); printf("\n");
-//     //printf("calchash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",           hash[i]); printf("\n");
-//     
-//     if (memcmp(hash,signature->hash,HASHSIZE)) ota_hash(address, signature->size, hash, 0xff);
-//     
-//     return memcmp(hash,signature->hash,HASHSIZE);
-    return 1;
+    byte hash[HASHSIZE+16]; //add 16 because mbedtls has 64 byte result also for SHA384
+//     ota_hash(address, signature->size, hash, file_first_byte[0]); //TODO 
+    //int i;
+    //printf("signhash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",signature->hash[i]); printf("\n");
+    //printf("calchash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",           hash[i]); printf("\n");
+    
+    if (memcmp(hash,signature->hash,HASHSIZE)) ota_hash(address, signature->size, hash, 0xff);
+    for (int i=0;i<HASHSIZE;i++) {printf("%02x ",hash[i]);} printf("hash384\n");
+    return memcmp(hash,signature->hash,HASHSIZE);
+}
+
+int   ota_verify_signature(signature_t* signature) {
+    UDPLGP("--- ota_verify_signature\n");
+    
+    int answer=0;
+
+//     wc_ecc_verify_hash(signature->sign, SIGNSIZE, signature->hash, HASHSIZE, &answer, &pubecckey);
+    UDPLGP("signature valid: %d\n",answer);
+        
+    return answer-1;
 }
 
 void  ota_write_status(char * version) {
