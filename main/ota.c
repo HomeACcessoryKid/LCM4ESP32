@@ -20,7 +20,6 @@
 //===============================
 
 #include "ota.h"
-#include "certs.h"
 #include "mbedtls/sha512.h" //contains sha384 support
 #define BUFFSIZE 1024
 #define NAME2SECTOR(sectorname) esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sectorname])
@@ -51,28 +50,33 @@ void  ota_active_sector() {
     byte fourbyte[4];
     active_cert_sector=HIGHERCERTSECTOR;
     backup_cert_sector=LOWERCERTSECTOR;
-    if (esp_partition_read(NAME2SECTOR(active_cert_sector),
-                                                    0,(byte *)fourbyte,4)!=ESP_OK) {
+    if (esp_partition_read(NAME2SECTOR(active_cert_sector),0,(byte *)fourbyte,4)!=ESP_OK) {
         UDPLGP("error reading flash\n");
     } // if OTHER  vvvvvv sector active
     if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
         active_cert_sector=LOWERCERTSECTOR;
         backup_cert_sector=HIGHERCERTSECTOR;
-        if (esp_partition_read(NAME2SECTOR(active_cert_sector),
-                                                        0,(byte *)fourbyte,4)!=ESP_OK) {
+        if (esp_partition_read(NAME2SECTOR(active_cert_sector),0,(byte *)fourbyte,4)!=ESP_OK) {
             UDPLGP("error reading flash\n");
         }
         if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
-// #ifdef OTABOOT
-//             #include "certs.h"
-//             active_cert_sector=HIGHERCERTSECTOR;
-//             backup_cert_sector=LOWERCERTSECTOR;
-//             spiflash_erase_sector(active_cert_sector); //just in case
-//             spiflash_write(active_cert_sector, certs_sector, certs_sector_len);
-// #else
+#ifdef OTABOOT
+            #include "certs.h"
+            active_cert_sector=HIGHERCERTSECTOR;
+            backup_cert_sector=LOWERCERTSECTOR;
+            esp_partition_erase_range(NAME2SECTOR(active_cert_sector),0,SECTORSIZE);
+            esp_partition_write(NAME2SECTOR(active_cert_sector),0,certs_sector, certs_sector_len);
+            if (esp_partition_read(NAME2SECTOR(active_cert_sector),0,(byte *)fourbyte,4)!=ESP_OK) {
+                UDPLGP("error reading flash\n");
+            } // if OTHER  vvvvvv sector active
+            if (fourbyte[0]!=0x30 || fourbyte[1]!=0x76 || fourbyte[2]!=0x30 || fourbyte[3]!=0x10 ) {
+                active_cert_sector=0;
+                backup_cert_sector=0;
+            }
+#else
             active_cert_sector=0;
             backup_cert_sector=0;
-// #endif
+#endif
         }
     }
     
@@ -87,9 +91,46 @@ esp_err_t ota_event_handler(esp_http_client_event_t *evt){
     return ESP_OK;
 }
 
+static int  verify = 1;
+void  ota_set_verify(int onoff) {
+    UDPLGP("--- ota_set_verify...");
+    
+    if (onoff) {
+        UDPLGP("ON\n");
+        if (verify==0) {
+            verify= 1;
+
+//             ret=wolfSSL_CTX_load_verify_buffer(ctx, certs, ret, SSL_FILETYPE_PEM);
+//             if ( ret != SSL_SUCCESS) {
+//                 UDPLGP("fail cert loading, return %d\n", ret);
+//             }
+//             free(certs);
+//             
+            time_t ts;
+//             do {
+                ts = time(NULL);
+//                 if (ts == ((time_t)-1)) printf("ts=-1, ");
+//                 vTaskDelay(1);
+//             } while (!(ts>1073741823)); //2^30-1 which is supposed to be like 2004
+            UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
+            
+//             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+        }
+    } else {
+        UDPLGP("OFF\n");
+        if (verify==1) {
+            verify= 0;
+//             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+        }
+    }
+}
+
+char *certs=NULL;
 void  ota_init() {
     UDPLGP("--- ota_init\n");
 
+    int size=0;
+    byte abyte[1];
 //     sysparam_get_bool("lcm_beta", &otabeta);
 //     sysparam_get_bool("ota_beta", &userbeta);
     UDPLGP("userbeta=\'%d\' otabeta=\'%d\'\n",userbeta,otabeta);
@@ -124,6 +165,17 @@ void  ota_init() {
 // 	sntp_initialize(NULL);
 // 	sntp_set_servers(servers, sizeof(servers) / sizeof(char*)); //Servers must be configured right after initialization
 
+    ota_active_sector();
+    
+    do {
+        if (esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE+(size++), (byte *)abyte, 1)!=ESP_OK) {
+            UDPLGP("error reading flash\n");
+            break;
+        }
+    } while (abyte[0]!=0xff); size--;
+    UDPLGP("certs size: %d\n",size);
+    certs=malloc(size);
+    esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, (byte *)certs, size);
     esp_http_client_config_t config1 = {
         .url = "https://" CONFIG_LCM_GITHOST "/",
         .cert_pem = certs,
@@ -139,8 +191,7 @@ void  ota_init() {
         task_fatal_error();
     }
 
-    ota_active_sector();
-//     ota_set_verify(0);
+    ota_set_verify(0);
 }
 
 int   ota_load_user_app(char * *repo, char * *version, char * *file) {
@@ -246,7 +297,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                     esp_ota_write(handle,(const void *)http_buffer,data_read);
                 } else if (sector) {//cert_sectors
                     if (!collected) { //TODO add first byte concept
-                        esp_partition_erase_range(NAME2SECTOR(sector),0,0x1000);
+                        esp_partition_erase_range(NAME2SECTOR(sector),0,SECTORSIZE);
                     }
                     esp_partition_write(NAME2SECTOR(sector),collected,http_buffer,data_read);
                 } else {//buffer
@@ -384,16 +435,14 @@ void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
     //printf("bytes: ");
     for (bytes=0;bytes<filesize-1024;bytes+=1024) {
         //printf("%d ",bytes);
-        if (esp_partition_read(NAME2SECTOR(start_sector),
-                                                        bytes,(byte *)buffer,1024)!=ESP_OK) {
+        if (esp_partition_read(NAME2SECTOR(start_sector),bytes,(byte *)buffer,1024)!=ESP_OK) {
             UDPLGP("error reading flash\n");   break;
         }
         if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
         mbedtls_sha512_update_ret(&sha, buffer, 1024);
     }
     //printf("%d\n",bytes);
-    if (esp_partition_read(NAME2SECTOR(start_sector),
-                                                        bytes,(byte *)buffer,filesize-bytes)!=ESP_OK) {
+    if (esp_partition_read(NAME2SECTOR(start_sector),bytes,(byte *)buffer,filesize-bytes)!=ESP_OK) {
         UDPLGP("error reading flash @ %d for %d bytes\n",start_sector+bytes,filesize-bytes);
     }
     if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
