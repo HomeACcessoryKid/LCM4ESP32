@@ -115,12 +115,14 @@ void  ota_set_verify(int onoff) {
             UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
             
 //             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+//             mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         }
     } else {
         UDPLGP("OFF\n");
         if (verify==1) {
             verify= 0;
 //             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
+//             mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_NONE);
         }
     }
 }
