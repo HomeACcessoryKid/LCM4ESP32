@@ -1,20 +1,6 @@
-/* OTA example adapted for LCM4ESP32
-   based on fix for https://github.com/espressif/esp-idf/issues/8873:
-   /opt/esp/idf/components/esp_http_client# mv esp_http_client.c esp_http_client.c.0
-   /opt/esp/idf/components/esp_http_client# cat esp_http_client.c.0 | \
-   sed 's/http_utils_append_string(\&client->location/http_utils_assign_string(\&client->location/' > esp_http_client.c
-   root@15550ce5e2b8:/opt/esp/idf/components/esp_http_client# diff esp_http_client.c*
-   236c236
-   <         http_utils_assign_string(&client->location, at, length);
-   ---
-   >         http_utils_append_string(&client->location, at, length);
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
+/* (c) 2018-2022 HomeAccessoryKid
+ * LCM4ESP32 based on LifeCycleManager dual app
+ */
 
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -96,7 +82,6 @@ void ota_task(void *arg) {
             if (ota_get_hash(OTAREPO, ota_version, CERTFILE, &signature)) { //no certs.sector.sig exists yet on server
                     continue; //loop and try again later
             }
-/*    
             if (ota_verify_hash(active_cert_sector,&signature)) { //seems we need to download certificates
                 if (ota_verify_signature(&signature)) { //maybe an update on the public key
                     keyid=1;
@@ -118,10 +103,11 @@ void ota_task(void *arg) {
                 }
                 ota_get_file(OTAREPO,ota_version,CERTFILE,backup_cert_sector); //CERTFILE=public-1.key
                 if (ota_verify_hash(backup_cert_sector,&signature)) break; //leads to boot=0
-//                 ota_swap_cert_sector();
+                ota_swap_cert_sector();
                 ota_get_pubkey(active_cert_sector);
             } //certificates are good now
             
+/*    
 #ifdef OTABOOT    
             //now get the latest ota main software in boot sector 1
             if (ota_get_hash(OTAREPO, ota_version, MAINFILE, &signature)) { //no signature yet

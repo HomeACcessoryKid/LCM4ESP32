@@ -462,17 +462,17 @@ printf("location=%s\n",found_ptr);
                         recv_bytes += ret;
                         if (sector) { //write to flash
                             if (writespace<ret) {
-                                UDPLGP("erasing@0x%05x>", sector+collected);
-                                if (!esp_partition_erase_range(NAME2SECTOR(sector),collected,SECTORSIZE)) return -6; //erase error
+                                UDPLGP("erasing %s@0x%05x>", sectorlabel[sector],collected);
+                                if (esp_partition_erase_range(NAME2SECTOR(sector),collected,SECTORSIZE)) return -6; //erase error
 //                                 if (!spiflash_erase_sector(sector+collected)) return -6; //erase error
                                 writespace+=SECTORSIZE;
                             }
                             if (collected) {
-                                if (!esp_partition_write(NAME2SECTOR(sector),collected,(byte *)recv_buf,ret)) return -7; //write error
+                                if (esp_partition_write(NAME2SECTOR(sector),collected,(byte *)recv_buf,ret)) return -7; //write error
 //                                 if (!spiflash_write(sector+collected, (byte *)recv_buf,   ret  )) return -7; //write error
                             } else { //at the very beginning, do not write the first byte yet but store it for later
                                 file_first_byte[0]=(byte)recv_buf[0];
-                                if (!esp_partition_write(NAME2SECTOR(sector),1,  (byte *)recv_buf+1,  ret-1)) return -7; //write error
+                                if (esp_partition_write(NAME2SECTOR(sector),1,  (byte *)recv_buf+1,  ret-1)) return -7; //write error
 //                                 if (!spiflash_write(sector+1        , (byte *)recv_buf+1, ret-1)) return -7; //write error
                             }
                             writespace-=ret;
@@ -583,13 +583,19 @@ printf("location=%s\n",found_ptr);
 ////    }
 ////    return collected;
 ////}
-////
-////int   ota_get_file(char * repo, char * version, char * file, int sector) { //number of bytes
-////    UDPLGP("--- ota_get_file\n");
-////    return ota_get_file_ex(repo,version,file,sector,NULL,0);
-////}
-////
 
+void  ota_finalize_file(int sector) {
+    UDPLGP("--- ota_finalize_file\n");
+
+    if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)file_first_byte,1)) UDPLGP("error writing flash\n");
+//     if (!spiflash_write(sector, file_first_byte, 1)) UDPLGP("error writing flash\n");
+    //TODO: add verification and retry and if wrong return status...
+}
+
+int   ota_get_file(char * repo, char * version, char * file, int sector) { //number of bytes
+   UDPLGP("--- ota_get_file\n");
+   return ota_get_file_ex(repo,version,file,sector,NULL,0);
+}
 
 char* ota_get_version(char * repo) {
     UDPLGP("--- ota_get_version\n");
@@ -787,7 +793,7 @@ int   ota_verify_hash(int address, signature_t* signature) {
     UDPLGP("--- ota_verify_hash\n");
     
     byte hash[HASHSIZE+16]; //add 16 because mbedtls has 64 byte result also for SHA384
-//     ota_hash(address, signature->size, hash, file_first_byte[0]); //TODO 
+    ota_hash(address, signature->size, hash, file_first_byte[0]);
     //int i;
     //printf("signhash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",signature->hash[i]); printf("\n");
     //printf("calchash:"); for (i=0;i<HASHSIZE;i++) printf(" %02x",           hash[i]); printf("\n");
@@ -804,8 +810,31 @@ int   ota_verify_signature(signature_t* signature) {
 
 //     wc_ecc_verify_hash(signature->sign, SIGNSIZE, signature->hash, HASHSIZE, &answer, &pubecckey);
     UDPLGP("signature valid: %d\n",answer);
-        
+
+return 0; //TODO REMOVE AFTER TESTING
     return answer-1;
+}
+
+void  ota_kill_file(int sector) {
+    UDPLGP("--- ota_kill_file\n");
+
+    byte zero[]={0x00};
+    if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)zero,1)) UDPLGP("error writing flash\n");
+//     if (!spiflash_write(sector, zero, 1)) UDPLGP("error writing flash\n");
+}
+
+void  ota_swap_cert_sector() {
+    UDPLGP("--- ota_swap_cert_sector\n");
+    
+    ota_kill_file(active_cert_sector);
+    ota_finalize_file(backup_cert_sector);
+    if (active_cert_sector==HIGHERCERTSECTOR) {
+        active_cert_sector=LOWERCERTSECTOR;
+        backup_cert_sector=HIGHERCERTSECTOR;
+    } else {
+        active_cert_sector=HIGHERCERTSECTOR;
+        backup_cert_sector=LOWERCERTSECTOR;
+    }
 }
 
 void  ota_write_status(char * version) {
