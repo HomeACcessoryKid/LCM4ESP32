@@ -21,23 +21,53 @@
 
 #include "ota.h"
 #include "mbedtls/sha512.h" //contains sha384 support
+
+#include "mbedtls/platform.h"
+#include "mbedtls/net_sockets.h"
+#include "mbedtls/esp_debug.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/error.h"
+#include "mbedtls/certs.h"
+
+mbedtls_ssl_config mbedtls_conf;
+mbedtls_entropy_context entropy;
+mbedtls_ctr_drbg_context ctr_drbg;
+mbedtls_x509_crt cacert;
+
+
 #define BUFFSIZE 1024
 #define NAME2SECTOR(sectorname) esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sectorname])
 
 static const char *TAG = "native_ota_library";
 /*an ota data write buffer ready to write to the flash*/
-static char http_buffer[BUFFSIZE + 1] = { 0 };
 
 char sectorlabel[][10]={"zero","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
 bool userbeta=0;
 bool otabeta=0;
 // int8_t led=16;
-esp_http_client_handle_t client1=NULL, client2=NULL;
+static byte file_first_byte[]={0xff};
 
 static void __attribute__((noreturn)) task_fatal_error(void){
     ESP_LOGE(TAG, "Exiting task due to fatal error...");
     (void)vTaskDelete(NULL);
     while (1) {;}
+}
+
+char *ota_strstr(const char *full_string, const char *search) { //lowercase version of strstr()
+    char *lc_string = strdup(full_string);
+    unsigned char *ch = (unsigned char *) lc_string;
+    while(*ch) {
+        *ch = tolower(*ch);
+        ch++;
+    }
+    const char *found = strstr(lc_string, search);
+    free(lc_string);
+    if(found == NULL) return NULL;    
+    const int offset = (int) found - (int) lc_string;
+    
+    return (char *) ((int) full_string + offset);
 }
 
 void  ota_active_sector() {
@@ -83,14 +113,6 @@ void  ota_active_sector() {
     UDPLGP("%s\n",sectorlabel[active_cert_sector]);
 }
 
-char location[600];
-esp_err_t ota_event_handler(esp_http_client_event_t *evt){
-    if (evt->event_id==HTTP_EVENT_ON_HEADER && !strcasecmp(evt->header_key,"location")) {
-        strcpy(location,evt->header_value);
-    }
-    return ESP_OK;
-}
-
 static int  verify = 1;
 void  ota_set_verify(int onoff) {
     UDPLGP("--- ota_set_verify...");
@@ -115,19 +137,18 @@ void  ota_set_verify(int onoff) {
             UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
             
 //             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-//             mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         }
     } else {
         UDPLGP("OFF\n");
         if (verify==1) {
             verify= 0;
 //             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
-//             mbedtls_ssl_conf_authmode(&tls->conf, MBEDTLS_SSL_VERIFY_NONE);
+            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_NONE);
         }
     }
 }
 
-char *certs=NULL;
 void  ota_init() {
     UDPLGP("--- ota_init\n");
 
@@ -176,23 +197,22 @@ void  ota_init() {
         }
     } while (abyte[0]!=0xff); size--;
     UDPLGP("certs size: %d\n",size);
-    certs=malloc(size);
-    esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, (byte *)certs, size);
-    esp_http_client_config_t config1 = {
-        .url = "https://" CONFIG_LCM_GITHOST "/",
-        .cert_pem = certs,
-        .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
-        .keep_alive_enable = true,
-        .buffer_size    = 1024,
-        .buffer_size_tx = 1024,
-        .event_handler = ota_event_handler,
-    };
-    client1 = esp_http_client_init(&config1);
-    if (client1 == NULL) {
-        ESP_LOGE(TAG, "Failed to initialise HTTP connection");
-        task_fatal_error();
-    }
+    byte* certs=malloc(size);
+    esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, certs, size);
 
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,NULL, 0);
+    mbedtls_ssl_config_init(&mbedtls_conf);
+    mbedtls_ssl_config_defaults(&mbedtls_conf,MBEDTLS_SSL_IS_CLIENT,MBEDTLS_SSL_TRANSPORT_STREAM,MBEDTLS_SSL_PRESET_DEFAULT);
+    mbedtls_x509_crt_init(&cacert);
+    printf("cert parse: %d errors\n",mbedtls_x509_crt_parse(&cacert,certs,size));
+    mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL);
+    mbedtls_ssl_conf_rng(&mbedtls_conf, mbedtls_ctr_drbg_random, &ctr_drbg);
+    #ifdef CONFIG_MBEDTLS_DEBUG
+        mbedtls_esp_enable_debug_log(&mbedtls_conf, CONFIG_MBEDTLS_DEBUG_LEVEL);
+    #endif
+    
     ota_set_verify(0);
 }
 
@@ -224,156 +244,444 @@ int   ota_load_user_app(char * *repo, char * *version, char * *file) {
     return 0;
 }
 
+static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtls_ssl_context *ssl) {
+    UDPLGP("--- ota_connect\n");
+    char buf[512];
+    int ret, flags;
+    
+    mbedtls_net_init(socket);
+    ESP_LOGI(TAG, "Connecting to %s:%d...", host, port);
+    if ((ret = mbedtls_net_connect(socket, host,itoa(port,buf,10),MBEDTLS_NET_PROTO_TCP)) != 0) {
+        ESP_LOGE(TAG, "mbedtls_net_connect returned -%x", -ret);
+        return -2;
+    }
+    ESP_LOGI(TAG, "Connected.");
+
+    if (port==HTTPS_PORT) { //SSL mode, in emergency mode this is skipped
+        mbedtls_ssl_init(ssl);
+         // Hostname set here should match CN in server certificate
+        if((ret = mbedtls_ssl_set_hostname(ssl, host)) != 0) {
+            ESP_LOGE(TAG, "mbedtls_ssl_set_hostname returned -0x%x", -ret);
+            return -1;
+        }
+        ESP_LOGI(TAG, "SSLsetup...");
+        if ((ret = mbedtls_ssl_setup(ssl, &mbedtls_conf)) != 0) {
+            ESP_LOGE(TAG, "mbedtls_ssl_setup returned -0x%x\n\n", -ret);
+            return -1;
+        }
+        ESP_LOGI(TAG, "BIOsetup...");
+        mbedtls_ssl_set_bio(ssl, socket, mbedtls_net_send, mbedtls_net_recv, NULL);
+//     ret = wolfSSL_UseSNI(*ssl, WOLFSSL_SNI_HOST_NAME, host, strlen(host));
+//     if (verify) ret=wolfSSL_check_domain_name(*ssl, host);
+        ESP_LOGI(TAG, "Performing the SSL/TLS handshake...");
+        while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
+            if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
+                ESP_LOGE(TAG, "mbedtls_ssl_handshake returned -0x%x", -ret);
+                return -1;
+            }
+        }
+        ESP_LOGI(TAG, "Verifying peer X.509 certificate...");
+        if ((flags = mbedtls_ssl_get_verify_result(ssl)) != 0) {
+            ESP_LOGW(TAG, "Failed to verify peer certificate!");
+            bzero(buf, sizeof(buf));
+            mbedtls_x509_crt_verify_info(buf, sizeof(buf), "  ! ", flags);
+            ESP_LOGW(TAG, "verification info: %s", buf);
+        } else {
+            ESP_LOGI(TAG, "Certificate verified.");
+        }
+        ESP_LOGI(TAG, "Cipher suite is %s", mbedtls_ssl_get_ciphersuite(ssl));
+    } //end SSL mode
+    return 0;
+}
+
 int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte * buffer, int bufsz) { //number of bytes
     UDPLGP("--- ota_get_file_ex\n");
-
+    
+    int retc, ret=0, slash;
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context socket;
+    //host=begin(repo);
+    //mid =end(repo)+blabla+version
     char* found_ptr=NULL;
+    char recv_buf[RECV_BUF_LEN];
+    int  recv_bytes = 0;
+    int  send_bytes; //= sizeof(send_data);
+    int  length=1;
+    int  clength=0;
+    int  left;
+    int  collected=0;
+    int  writespace=0;
+    int  header;
     bool emergency=(strcmp(version,EMERGENCY))?0:1;
-    int data_read=0;
-    int collected=0;
-    esp_err_t err;
-    esp_ota_handle_t handle=0;
+    int  port=(emergency)?HTTP_PORT:HTTPS_PORT;
     
     if (sector==0 && buffer==NULL) return -5; //needs to be either a sector or a signature
     
     if (!emergency) { //if not emergency, find the redirection done by GitHub
-        snprintf(location,600,"https://%s/%s/releases/download/%s/%s",CONFIG_LCM_GITHOST,repo,version,file);
-        esp_http_client_set_url(client1,location);
-    } else { //emergency mode, repo is expected to have the format "not.github.com/somewhere/"
-//         esp_http_client_set_url(client,);
-    } //loaded the right url
-    printf("URL1=%s\n",location);
-    err = esp_http_client_open(client1, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client1);
-        task_fatal_error();
-    }
-    esp_http_client_fetch_headers(client1);
-    int code=esp_http_client_get_status_code(client1);
-    printf("code1=%d\n",code);
+    strcat(strcat(strcat(strcat(strcat(strcat(strcat(strcat(strcpy(recv_buf, \
+        REQUESTHEAD),repo),"/releases/download/"),version),"/"),file),REQUESTTAIL),CONFIG_LCM_GITHOST),CRLFCRLF);
+    send_bytes=strlen(recv_buf);
+    UDPLGP("%s",recv_buf);
+
+    retc = ota_connect(CONFIG_LCM_GITHOST, HTTPS_PORT, &socket, &ssl);  //release socket and ssl when ready
     
-    if (code==302) {
-        http_buffer[esp_http_client_read(client1, http_buffer, BUFFSIZE)]=0;
-        if (http_buffer[0]) printf("flushed: %s\n",http_buffer);
-        //now setup client2 with location as url
-        if (client2==NULL) {
-            esp_http_client_config_t config2 = {
-                .url = location,
-                .cert_pem = certs,
-                .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
-                .keep_alive_enable = true,
-                .buffer_size    = 1024,
-                .buffer_size_tx = 1024,
-            };
-            client2 = esp_http_client_init(&config2);
-            if (client2 == NULL) {
-                ESP_LOGE(TAG, "Failed to initialise HTTP connection");
-                task_fatal_error();
+    if (!retc) {
+        ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+        if (ret > 0) {
+            UDPLGP("sent OK\n");
+
+            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
+            if (ret > 0) {
+                recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+                found_ptr=ota_strstr(recv_buf,"http/1.1 ");
+                found_ptr+=9; //flush "HTTP/1.1 "
+                slash=atoi(found_ptr);
+                UDPLGP("HTTP returns %d\n",slash);
+                if (slash!=302) {
+                    mbedtls_ssl_session_reset(&ssl);
+                    mbedtls_net_free(&socket);
+                    return -1;
+                }
+            } else {
+                UDPLGP("failed, return [-0x%x]\n", -ret);
+//                 ret=wolfSSL_get_error(ssl,ret);
+//                 UDPLGP("wolfSSL_send error = %d\n", ret);
+                return -1;
             }
+            while (1) {
+//                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+                found_ptr=ota_strstr(recv_buf,"\nlocation:");
+                if (found_ptr) break;
+//                 mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 12);
+//                 ret = mbedtls_ssl_peek(&ssl, recv_buf, RECV_BUF_LEN - 1); //peek
+                if (ret <= 0) {
+                    UDPLGP("failed, return [-0x%x]\n", -ret);
+//                     ret=wolfSSL_get_error(ssl,ret);
+//                     UDPLGP("wolfSSL_send error = %d\n", ret);
+                    return -1;
+                }
+            }
+//             ret=mbedtls_ssl_read(&ssl, recv_buf, found_ptr-recv_buf + 11); //flush all previous material
+//             ret=mbedtls_ssl_read(&ssl, recv_buf, RECV_BUF_LEN - 1); //this starts for sure with the content of "Location: "
+//             recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+//             strchr(recv_buf,'\r')[0]=0;
+            strchr(found_ptr,'\r')[0]=0;
+//             found_ptr=recv_buf;
+            found_ptr=ota_strstr(recv_buf,"https://");
+            //if (found_ptr[0] == ' ') found_ptr++;
+            found_ptr+=8; //flush https://
+            //printf("location=%s\n",found_ptr);
+printf("location=%s\n",found_ptr);
         } else {
-            esp_http_client_set_url(client2,location);
-        } //now url is set for client2
-        printf("URL2=%s\n",location);
-        err = esp_http_client_open(client2, 0);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-            esp_http_client_cleanup(client2);
-            task_fatal_error();
-        }
-        esp_http_client_fetch_headers(client2);
-        int code=esp_http_client_get_status_code(client2);
-        printf("code2=%d\n",code);
-        while (1) {
-            data_read = esp_http_client_read(client2, http_buffer, BUFFSIZE);
-            if (data_read < 0) {
-                ESP_LOGE(TAG, "Error: SSL data read error");
-                esp_http_client_cleanup(client2);
-                task_fatal_error();
-            } else if (data_read > 0) {
-                if (sector>2) {//ota partitions
-                    if (!collected) {
-                        esp_ota_begin(NAME2SECTOR(sector),
-                        OTA_WITH_SEQUENTIAL_WRITES, &handle);
-                    }
-                    esp_ota_write(handle,(const void *)http_buffer,data_read);
-                } else if (sector) {//cert_sectors
-                    if (!collected) { //TODO add first byte concept
-                        esp_partition_erase_range(NAME2SECTOR(sector),0,SECTORSIZE);
-                    }
-                    esp_partition_write(NAME2SECTOR(sector),collected,http_buffer,data_read);
-                } else {//buffer
-                    memcpy(buffer+collected,http_buffer,data_read);
-                }
-                collected+=data_read;
-            } else if (data_read == 0) {
-                // As esp_http_client_read never returns negative error code, we rely on
-                // `errno` to check for underlying transport connectivity closure if any
-                if (errno == ECONNRESET || errno == ENOTCONN) {
-                    ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
-                    break;
-                }
-                if (esp_http_client_is_complete_data_received(client2) == true) {
-                    printf("Transfer Complete: ");
-                    break;
-                }
-            }
-        }
-        if (sector>2) {//ota partitions
-            esp_ota_end(handle);
-            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
-        } else if (sector) {//cert_sectors
-            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
-        } else {//buffer
-            printf("data length=%d, buffer=%02x%02x %02x%02x ... %02x%02x %02x%02x\n",collected,
-            buffer[0],buffer[1],buffer[2],buffer[3],buffer[collected-4],
-            buffer[collected-3],buffer[collected-2],buffer[collected-1]);
-        }
-        if (esp_http_client_is_complete_data_received(client2) != true) {
-            ESP_LOGE(TAG, "Error in receiving complete file");
-            return -5; //TODO check values
+            UDPLGP("failed, return [-0x%x]\n", -ret);
+//             ret=wolfSSL_get_error(ssl,ret);
+//             UDPLGP("wolfSSL_send error = %d\n", ret);
         }
     }
+    switch (retc) {
+        case  0:
+        case -1:
+        mbedtls_ssl_session_reset(&ssl);
+        case -2:
+        mbedtls_net_free(&socket);
+        case -3:
+        default:
+        ;
+    }
+
+    if (retc) return retc;
+    if (ret <= 0) return ret;
+    
+    } else { //emergency mode, repo is expected to have the format "not.github.com/somewhere/"
+        strcpy(recv_buf,repo);
+        found_ptr=recv_buf;
+        if (found_ptr[strlen(found_ptr)-1]!='/') strcat(found_ptr, "/");
+        strcat(found_ptr, file);
+        UDPLGP("emergency GET http://%s\n",found_ptr);
+    } //found_ptr now contains the url without https:// or http://
+    //process the Location
+    strcat(found_ptr, REQUESTTAIL);
+    slash=strchr(found_ptr,'/')-found_ptr;
+    found_ptr[slash]=0; //cut behind the hostname
+    char * host2=malloc(strlen(found_ptr));
+    strcpy(host2,found_ptr);
+    //printf("next host: %s\n",host2);
+
+    retc = ota_connect(host2, port, &socket, &ssl);  //release socket and ssl when ready
+
+    strcat(strcat(found_ptr+slash+1,host2),RANGE); //append hostname and range to URI    
+    found_ptr+=slash-4;
+    memcpy(found_ptr,REQUESTHEAD,5);
+    char * getlinestart=malloc(strlen(found_ptr));
+    strcpy(getlinestart,found_ptr);
+    //printf("request:\n%s\n",getlinestart);
+    //if (!retc) {
+    while (collected<length) {
+        sprintf(recv_buf,"%s%d-%d%s",getlinestart,collected,collected+4095,CRLFCRLF);
+        send_bytes=strlen(recv_buf);
+        //printf("request:\n%s\n",recv_buf);
+        printf("send request......");
+        ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+//         if (emergency) ret = lwip_write(socket, recv_buf, send_bytes); else ret = wolfSSL_write(ssl, recv_buf, send_bytes);
+        recv_bytes=0;
+        if (ret > 0) {
+            printf("OK\n");
+
+            header=1;
+            memset(recv_buf,0,RECV_BUF_LEN);
+            do {
+                ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
+//                 if (emergency) ret = lwip_read(socket, recv_buf, RECV_BUF_LEN - 1); else ret = wolfSSL_read(ssl, recv_buf, RECV_BUF_LEN - 1);
+                if (ret > 0) {
+                    if (header) {
+                        //printf("%s\n-------- %d\n", recv_buf, ret);
+                        //parse Content-Length: xxxx
+                        found_ptr=ota_strstr(recv_buf,"\ncontent-length:");
+                        strchr(found_ptr,'\r')[0]=0;
+                        found_ptr+=16; //flush Content-Length://
+			            //if (found_ptr[0] == ' ') found_ptr++; //flush a space, atoi would also do that
+                        clength=atoi(found_ptr);
+                        found_ptr[strlen(found_ptr)]='\r'; //in case the order changes
+                        //parse Content-Range: bytes xxxx-yyyy/zzzz
+                        found_ptr=ota_strstr(recv_buf,"\ncontent-range:");
+                        strchr(found_ptr,'\r')[0]=0;
+                        found_ptr+=15; //flush Content-Range://
+                        found_ptr=ota_strstr(recv_buf,"bytes ");
+                        found_ptr+=6; //flush Content-Range: bytes //
+                        found_ptr=strstr(found_ptr,"/"); found_ptr++; //flush /
+                        length=atoi(found_ptr);
+                        found_ptr[strlen(found_ptr)]='\r'; //search the entire buffer again
+                        found_ptr=strstr(recv_buf,CRLFCRLF)+4; //go to end of header
+                        if ((left=ret-(found_ptr-recv_buf))) {
+                            header=0; //we have body in the same IP packet as the header so we need to process it already
+                            ret=left;
+                            memmove(recv_buf,found_ptr,left); //move this payload to the head of the recv_buf
+                        }
+                    }
+                    if (!header) {
+                        recv_bytes += ret;
+                        if (sector) { //write to flash
+                            if (writespace<ret) {
+                                UDPLGP("erasing@0x%05x>", sector+collected);
+                                if (!esp_partition_erase_range(NAME2SECTOR(sector),collected,SECTORSIZE)) return -6; //erase error
+//                                 if (!spiflash_erase_sector(sector+collected)) return -6; //erase error
+                                writespace+=SECTORSIZE;
+                            }
+                            if (collected) {
+                                if (!esp_partition_write(NAME2SECTOR(sector),collected,(byte *)recv_buf,ret)) return -7; //write error
+//                                 if (!spiflash_write(sector+collected, (byte *)recv_buf,   ret  )) return -7; //write error
+                            } else { //at the very beginning, do not write the first byte yet but store it for later
+                                file_first_byte[0]=(byte)recv_buf[0];
+                                if (!esp_partition_write(NAME2SECTOR(sector),1,  (byte *)recv_buf+1,  ret-1)) return -7; //write error
+//                                 if (!spiflash_write(sector+1        , (byte *)recv_buf+1, ret-1)) return -7; //write error
+                            }
+                            writespace-=ret;
+                        } else { //buffer
+                            if (ret>bufsz) return -8; //too big
+                            memcpy(buffer,recv_buf,ret);
+                        }
+                        collected+=ret;
+                        int i;
+                        for (i=0;i<3;i++) printf("%02x", recv_buf[i]);
+                        printf("...");
+                        for (i=3;i>0;i--) printf("%02x", recv_buf[ret-i]);
+                        printf(" ");
+                    }
+                } else {
+                    if (ret && !emergency) UDPLGP("error %d\n",ret);
+//                     if (ret && !emergency) {ret=wolfSSL_get_error(ssl,ret); UDPLGP("error %d\n",ret);}
+                    if (!ret && collected<length) retc = ota_connect(host2, port, &socket, &ssl); //memory leak?
+                    break;
+                }
+                header=0; //if header and body are separted
+            } while(recv_bytes<clength);
+            printf(" so far collected %d bytes\n", collected);
+            UDPLGP(" collected %d bytes\r",        collected); //UDPLOG
+        } else {
+            printf("failed, return [-0x%x]\n", -ret);
+            if (!emergency) {
+//             ret=wolfSSL_get_error(ssl,ret);
+//             printf("wolfSSL_send error = %d\n", ret);
+            }
+            if (ret==-308) {
+                retc = ota_connect(host2, port, &socket, &ssl); //dangerous for eternal connecting? memory leak?
+            } else {
+                break; //give up?
+            }
+        }
+    }
+    UDPLGP("\n"); //UDPLOG
+    switch (retc) {
+        case  0:
+        case -1:
+        if (!emergency) {
+        mbedtls_ssl_session_reset(&ssl);
+        }
+        case -2:
+        mbedtls_net_free(&socket);
+        case -3:
+        default:
+        ;
+    }
+    free(host2);
+    free(getlinestart);
+    if (retc) return retc;
+    if (ret < 0) return ret;
     return collected;
 }
 
-int   ota_get_file(char * repo, char * version, char * file, int sector) { //number of bytes
-    UDPLGP("--- ota_get_file\n");
-    return ota_get_file_ex(repo,version,file,sector,NULL,0);
-}
+////        printf("code2=%d\n",code);
+////        while (1) {
+////            data_read = esp_http_client_read(client2, http_buffer, BUFFSIZE);
+////            if (data_read < 0) {
+////                ESP_LOGE(TAG, "Error: SSL data read error");
+////                esp_http_client_cleanup(client2);
+////                task_fatal_error();
+////            } else if (data_read > 0) {
+////                if (sector>2) {//ota partitions
+////                    if (!collected) {
+////                        esp_ota_begin(NAME2SECTOR(sector),
+////                        OTA_WITH_SEQUENTIAL_WRITES, &handle);
+////                    }
+////                    esp_ota_write(handle,(const void *)http_buffer,data_read);
+////                } else if (sector) {//cert_sectors
+////                    if (!collected) { //TODO add first byte concept
+////                        esp_partition_erase_range(NAME2SECTOR(sector),0,SECTORSIZE);
+////                    }
+////                    esp_partition_write(NAME2SECTOR(sector),collected,http_buffer,data_read);
+////                } else {//buffer
+////                    memcpy(buffer+collected,http_buffer,data_read);
+////                }
+////                collected+=data_read;
+////            } else if (data_read == 0) {
+////                // As esp_http_client_read never returns negative error code, we rely on
+////                // `errno` to check for underlying transport connectivity closure if any
+////                if (errno == ECONNRESET || errno == ENOTCONN) {
+////                    ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
+////                    break;
+////                }
+////                if (esp_http_client_is_complete_data_received(client2) == true) {
+////                    printf("Transfer Complete: ");
+////                    break;
+////                }
+////            }
+////        }
+////        if (sector>2) {//ota partitions
+////            esp_ota_end(handle);
+////            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
+////        } else if (sector) {//cert_sectors
+////            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
+////        } else {//buffer
+////            printf("data length=%d, buffer=%02x%02x %02x%02x ... %02x%02x %02x%02x\n",collected,
+////            buffer[0],buffer[1],buffer[2],buffer[3],buffer[collected-4],
+////            buffer[collected-3],buffer[collected-2],buffer[collected-1]);
+////        }
+////        if (esp_http_client_is_complete_data_received(client2) != true) {
+////            ESP_LOGE(TAG, "Error in receiving complete file");
+////            return -5; //TODO check values
+////        }
+////    }
+////    return collected;
+////}
+////
+////int   ota_get_file(char * repo, char * version, char * file, int sector) { //number of bytes
+////    UDPLGP("--- ota_get_file\n");
+////    return ota_get_file_ex(repo,version,file,sector,NULL,0);
+////}
+////
+
 
 char* ota_get_version(char * repo) {
     UDPLGP("--- ota_get_version\n");
 
     char* version=NULL;
     char prerelease[64]; 
-    esp_err_t err;
+    int retc, ret=0;
+    int httpcode;
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context socket;
+    //host=begin(repo);
+    //mid =end(repo)+blabla+version
+    char* found_ptr;
+    char recv_buf[RECV_BUF_LEN];
+    int  send_bytes; //= sizeof(send_data);
     
-    snprintf(location,600,"https://%s/%s/releases/latest",CONFIG_LCM_GITHOST,repo);
-    esp_http_client_set_url(client1,location);
-    err = esp_http_client_open(client1, 0);
-    if (err != ESP_OK) { //TODO make this a macro
-        ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-        esp_http_client_cleanup(client1);
-        task_fatal_error();
+    strcat(strcat(strcat(strcat(strcat(strcpy(recv_buf, \
+        REQUESTHEAD),repo),"/releases/latest"),REQUESTTAIL),CONFIG_LCM_GITHOST),CRLFCRLF);
+    send_bytes=strlen(recv_buf);
+    //printf("%s\n",recv_buf);
+
+    retc = ota_connect(CONFIG_LCM_GITHOST, HTTPS_PORT, &socket, &ssl);  //release socket and ssl when ready
+    
+    if (!retc) {
+        UDPLGP("%s",recv_buf);
+        ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+        if (ret > 0) {
+            printf("sent OK\n");
+
+            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
+            if (ret > 0) {
+                recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+                found_ptr=ota_strstr(recv_buf,"http/1.1 ");
+                found_ptr+=9; //flush "HTTP/1.1 "
+                httpcode=atoi(found_ptr);
+                UDPLGP("HTTP returns %d for ",httpcode);
+                if (httpcode!=302) {
+                    mbedtls_ssl_session_reset(&ssl);
+                    mbedtls_net_free(&socket);
+                    return "404";
+                }
+            } else {
+                UDPLGP("failed, return [-0x%x]\n", -ret);
+//                 ret=wolfSSL_get_error(ssl,ret);
+//                 UDPLGP("wolfSSL_send error = %d\n", ret);
+                return "404";
+            }
+
+            while (1) {
+//                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+                found_ptr=ota_strstr(recv_buf,"\nlocation:");
+                if (found_ptr) break;
+//                 mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 12);
+//                 ret = mbedtls_ssl_peek(&ssl, recv_buf, RECV_BUF_LEN - 1); //peek
+                if (ret <= 0) {
+                    UDPLGP("failed, return [-0x%x]\n", -ret);
+//                     ret=wolfSSL_get_error(ssl,ret);
+//                     UDPLGP("wolfSSL_send error = %d\n", ret);
+                    return "404";
+                }
+            }
+//             ret=mbedtls_ssl_read(&ssl, recv_buf, found_ptr-recv_buf + 11); //flush all previous material
+//             ret=mbedtls_ssl_read(&ssl, recv_buf, RECV_BUF_LEN - 1); //this starts for sure with the content of "Location: "
+//             recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+//             strchr(recv_buf,'\r')[0]=0;
+            strchr(found_ptr,'\r')[0]=0;
+            found_ptr=ota_strstr(recv_buf,"releases/tag/");
+            if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
+            version=malloc(strlen(found_ptr+13));
+            strcpy(version,found_ptr+13);
+            printf("%s@version:\"%s\" according to latest release\n",repo,version);
+        } else {
+            UDPLGP("failed, return [-0x%x]\n", -ret);
+//             ret=wolfSSL_get_error(ssl,ret);
+//             UDPLGP("wolfSSL_send error = %d\n", ret);
+        }
     }
-    esp_http_client_fetch_headers(client1);
-    int code=esp_http_client_get_status_code(client1);
-    printf("code=%d\n",code);
-    if (code==302) {
-        // this doesn't work because it doesn't actually flush the internal buffer
-        // int flushlen;
-        // printf("result %d of ",esp_http_client_flush_response(client1,&flushlen));
-        // printf("flushed %d\n",flushlen);
-        http_buffer[esp_http_client_read(client1, http_buffer, BUFFSIZE)]=0;
-        char *found_ptr=strstr(location,"releases/tag/");
-        if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
-        version=malloc(strlen(found_ptr+13));
-        strcpy(version,found_ptr+13);
-        location[0]=0;
-    } else {
-        return "404";
+    switch (retc) {
+        case  0:
+        case -1:
+        mbedtls_ssl_session_reset(&ssl);
+        case -2:
+        mbedtls_net_free(&socket);
+        case -3:
+        default:
+        ;
     }
+
+//     if (retc) return retc;
+//     if (ret <= 0) return ret;
+
+//     //TODO: maybe add more error return messages... like version "99999.99.99"
 //     //find latest-pre-release if joined beta program
 //     bool OTAorBTL=!(strcmp(OTAREPO,repo)&&strcmp(BTLREPO,repo));
 //     if ( (userbeta && !OTAorBTL) || (otabeta && OTAorBTL)) {
@@ -396,9 +704,11 @@ char* ota_get_version(char * repo) {
 //         version=malloc(strlen(OTAVERSION)+1);
 //         strcpy(version,OTAVERSION);
 //     }
+    
     UDPLGP("%s@version:\"%s\"\n",repo,version);
     return version;
 }
+
 
 int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, report filesize
     UDPLGP("--- ota_get_pubkey\n");
@@ -469,7 +779,7 @@ int   ota_get_hash(char * repo, char * version, char * file, signature_t* signat
     memcpy(signature->hash,buffer,HASHSIZE);
     signature->size=((buffer[HASHSIZE]*256 + buffer[HASHSIZE+1])*256 + buffer[HASHSIZE+2])*256 + buffer[HASHSIZE+3];
     if (ret>HASHSIZE+4) memcpy(signature->sign,buffer+HASHSIZE+4,SIGNSIZE);
-
+ 
     return 0;
 }
 

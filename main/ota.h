@@ -24,7 +24,13 @@
 #define SYSPARAMSECTOR 0xF7000
 #define BOOT0SECTOR 3
 #define BOOT1SECTOR 4
-
+#define HTTPS_PORT 443
+#define HTTP_PORT   80
+#define REQUESTHEAD "GET /"
+#define REQUESTTAIL " HTTP/1.1\r\nHost: "
+#define CRLFCRLF "\r\n\r\n"
+#define RECV_BUF_LEN 1025  // current length of amazon URL 724
+#define RANGE "\r\nRange: bytes="
 #define MAXVERSIONLEN 16
 #define SNTP_SERVERS 	"0.pool.ntp.org", "1.pool.ntp.org", "2.pool.ntp.org", "3.pool.ntp.org"
 

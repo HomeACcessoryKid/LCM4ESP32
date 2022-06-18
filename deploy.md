@@ -25,3 +25,13 @@ to flash use this command
     write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect \
     0x300000 build/LCM4ESP32.bin
 
+
+get vi in the container
+apt-get update
+apt-get install vim
+
+depending less of mapped container volume for much faster compilation:
+idf.py fullclean (only once)
+ln -s /mnt build/esp-idf
+idf.py fullclean
+rm -rd /mnt/*

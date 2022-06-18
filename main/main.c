@@ -96,8 +96,8 @@ void ota_task(void *arg) {
             if (ota_get_hash(OTAREPO, ota_version, CERTFILE, &signature)) { //no certs.sector.sig exists yet on server
                     continue; //loop and try again later
             }
-            if (ota_verify_hash(active_cert_sector,&signature)) { //seems we need to download certificates
 /*    
+            if (ota_verify_hash(active_cert_sector,&signature)) { //seems we need to download certificates
                 if (ota_verify_signature(&signature)) { //maybe an update on the public key
                     keyid=1;
                     while (sprintf(keyname,KEYNAME,keyid) , !ota_get_hash(OTAREPO, ota_version, keyname, &signature)) {
@@ -116,7 +116,6 @@ void ota_task(void *arg) {
                     }
                     if (!foundkey) break; //leads to boot=0
                 }
-*/
                 ota_get_file(OTAREPO,ota_version,CERTFILE,backup_cert_sector); //CERTFILE=public-1.key
                 if (ota_verify_hash(backup_cert_sector,&signature)) break; //leads to boot=0
 //                 ota_swap_cert_sector();
@@ -180,6 +179,7 @@ void ota_task(void *arg) {
             } //nothing to update
             break; //leads to boot=0 and starts updated user app
 #endif //OTABOOT
+*/
         }
     }
     ota_reboot(); //boot0, either the user program or the otaboot app
