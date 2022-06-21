@@ -30,17 +30,18 @@
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
 #include "mbedtls/certs.h"
+#include "mbedtls/ecdsa.h"
 
 mbedtls_ssl_config mbedtls_conf;
 mbedtls_entropy_context entropy;
 mbedtls_ctr_drbg_context ctr_drbg;
 mbedtls_x509_crt cacert;
-
+mbedtls_ecdsa_context mbedtls_ecdsa_ctx;
 
 #define BUFFSIZE 1024
 #define NAME2SECTOR(sectorname) esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sectorname])
 
-static const char *TAG = "native_ota_library";
+static const char *TAG = "LCM";
 /*an ota data write buffer ready to write to the flash*/
 
 char sectorlabel[][10]={"zero","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
@@ -144,7 +145,7 @@ void  ota_set_verify(int onoff) {
         if (verify==1) {
             verify= 0;
 //             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
-            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_NONE);
+            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
         }
     }
 }
@@ -188,6 +189,9 @@ void  ota_init() {
 // 	sntp_initialize(NULL);
 // 	sntp_set_servers(servers, sizeof(servers) / sizeof(char*)); //Servers must be configured right after initialization
 
+    mbedtls_ecdsa_init(&mbedtls_ecdsa_ctx);
+    mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.grp, MBEDTLS_ECP_DP_SECP384R1);
+    
     ota_active_sector();
     
     do {
@@ -199,6 +203,7 @@ void  ota_init() {
     UDPLGP("certs size: %d\n",size);
     byte* certs=malloc(size);
     esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, certs, size);
+    if (certs[size-1]==0x0a) certs[size-1]=0x00; //life-cycle-manager wolfssl uses a closing 0x0a but mbedtls requires a 0x00
 
     mbedtls_entropy_init(&entropy);
     mbedtls_ctr_drbg_init(&ctr_drbg);
@@ -255,7 +260,7 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
         ESP_LOGE(TAG, "mbedtls_net_connect returned -%x", -ret);
         return -2;
     }
-    ESP_LOGI(TAG, "Connected.");
+    //ESP_LOGI(TAG, "Connected.");
 
     if (port==HTTPS_PORT) { //SSL mode, in emergency mode this is skipped
         mbedtls_ssl_init(ssl);
@@ -264,32 +269,31 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
             ESP_LOGE(TAG, "mbedtls_ssl_set_hostname returned -0x%x", -ret);
             return -1;
         }
-        ESP_LOGI(TAG, "SSLsetup...");
+        //ESP_LOGI(TAG, "SSLsetup...");
         if ((ret = mbedtls_ssl_setup(ssl, &mbedtls_conf)) != 0) {
             ESP_LOGE(TAG, "mbedtls_ssl_setup returned -0x%x\n\n", -ret);
             return -1;
         }
-        ESP_LOGI(TAG, "BIOsetup...");
+        //ESP_LOGI(TAG, "BIOsetup...");
         mbedtls_ssl_set_bio(ssl, socket, mbedtls_net_send, mbedtls_net_recv, NULL);
 //     ret = wolfSSL_UseSNI(*ssl, WOLFSSL_SNI_HOST_NAME, host, strlen(host));
 //     if (verify) ret=wolfSSL_check_domain_name(*ssl, host);
-        ESP_LOGI(TAG, "Performing the SSL/TLS handshake...");
+        //ESP_LOGI(TAG, "Performing the SSL/TLS handshake...");
         while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
             if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
                 ESP_LOGE(TAG, "mbedtls_ssl_handshake returned -0x%x", -ret);
                 return -1;
             }
         }
-        ESP_LOGI(TAG, "Verifying peer X.509 certificate...");
+        //ESP_LOGI(TAG, "Verifying peer X.509 certificate...");
         if ((flags = mbedtls_ssl_get_verify_result(ssl)) != 0) {
-            ESP_LOGW(TAG, "Failed to verify peer certificate!");
             bzero(buf, sizeof(buf));
-            mbedtls_x509_crt_verify_info(buf, sizeof(buf), "  ! ", flags);
-            ESP_LOGW(TAG, "verification info: %s", buf);
+            mbedtls_x509_crt_verify_info(buf, sizeof(buf), "", flags);
+            ESP_LOGI(TAG, "%s", buf);
         } else {
             ESP_LOGI(TAG, "Certificate verified.");
         }
-        ESP_LOGI(TAG, "Cipher suite is %s", mbedtls_ssl_get_ciphersuite(ssl));
+        //ESP_LOGI(TAG, "Cipher suite is %s", mbedtls_ssl_get_ciphersuite(ssl));
     } //end SSL mode
     return 0;
 }
@@ -733,9 +737,16 @@ int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, 
     length=97;
     
     int idx; for (idx=0;idx<length;idx++) printf(" %02x",buffer[idx+23]);
+    printf("\n");
+
+    //typedef struct mbedtls_ecp_keypair { //this is also mbedtls_ecdsa_context
+    //    mbedtls_ecp_group grp;      /*!<  Elliptic curve and base point     */
+    //    mbedtls_mpi d;              /*!<  our secret value                  */
+    //    mbedtls_ecp_point Q;        /*!<  our public value                  */
+    ret=mbedtls_ecp_point_read_binary(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q,buffer+23,length);
+    printf("keycheck: 0x%02x\n",mbedtls_ecp_check_pubkey(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q));
 //     wc_ecc_init(&pubecckey);
 //     ret=wc_ecc_import_x963_ex(buffer+23,length,&pubecckey,ECC_SECP384R1);
-    printf("\n");
     UDPLGP("ret: %d\n",ret);
 
     if (!ret)return PKEYSIZE; else return ret;
@@ -807,12 +818,13 @@ int   ota_verify_signature(signature_t* signature) {
     UDPLGP("--- ota_verify_signature\n");
     
     int answer=0;
-
+    answer=mbedtls_ecdsa_read_signature(&mbedtls_ecdsa_ctx,signature->hash,HASHSIZE,signature->sign,signature->sign[1]+2);
 //     wc_ecc_verify_hash(signature->sign, SIGNSIZE, signature->hash, HASHSIZE, &answer, &pubecckey);
-    UDPLGP("signature valid: %d\n",answer);
+    UDPLGP("signature valid:%s code:0x%02x\n",answer?"no":"yes",answer);
+//     UDPLGP("signature valid:%s code:0x%02x\n",answer-1?"no":"yes",answer);
 
-return 0; //TODO REMOVE AFTER TESTING
-    return answer-1;
+    return answer;
+//     return answer-1;
 }
 
 void  ota_kill_file(int sector) {
@@ -835,6 +847,7 @@ void  ota_swap_cert_sector() {
         active_cert_sector=HIGHERCERTSECTOR;
         backup_cert_sector=LOWERCERTSECTOR;
     }
+    //TODO: must setup mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL); again
 }
 
 void  ota_write_status(char * version) {
