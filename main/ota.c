@@ -44,7 +44,7 @@ mbedtls_ecdsa_context mbedtls_ecdsa_ctx;
 static const char *TAG = "LCM";
 /*an ota data write buffer ready to write to the flash*/
 
-char sectorlabel[][10]={"zero","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
+char sectorlabel[][10]={"buffer","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
 bool userbeta=0;
 bool otabeta=0;
 // int8_t led=16;
@@ -304,6 +304,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     int retc, ret=0, slash;
     mbedtls_ssl_context ssl;
     mbedtls_net_context socket;
+    esp_ota_handle_t handle=0;
     //host=begin(repo);
     //mid =end(repo)+blabla+version
     char* found_ptr=NULL;
@@ -464,7 +465,10 @@ printf("location=%s\n",found_ptr);
                     }
                     if (!header) {
                         recv_bytes += ret;
-                        if (sector) { //write to flash
+                        if (sector>2) {//ota partitions
+                           if (!collected) esp_ota_begin(NAME2SECTOR(sector),OTA_WITH_SEQUENTIAL_WRITES, &handle);
+                           esp_ota_write(handle,(const void *)recv_buf,ret);
+                        } else if (sector) {//cert_sectors
                             if (writespace<ret) {
                                 UDPLGP("erasing %s@0x%05x>", sectorlabel[sector],collected);
                                 if (esp_partition_erase_range(NAME2SECTOR(sector),collected,SECTORSIZE)) return -6; //erase error
@@ -500,7 +504,7 @@ printf("location=%s\n",found_ptr);
                 header=0; //if header and body are separted
             } while(recv_bytes<clength);
             printf(" so far collected %d bytes\n", collected);
-            UDPLGP(" collected %d bytes\r",        collected); //UDPLOG
+//             UDPLGP(" collected %d bytes\r",        collected); //UDPLOG
         } else {
             printf("failed, return [-0x%x]\n", -ret);
             if (!emergency) {
@@ -514,6 +518,21 @@ printf("location=%s\n",found_ptr);
             }
         }
     }
+    if (sector>2) { //ota partitions
+        esp_err_t err = esp_ota_end(handle);
+        if (err != ESP_OK) {
+            if (err == ESP_ERR_OTA_VALIDATE_FAILED) ESP_LOGE(TAG, "Image validation failed, image is corrupted");
+            else ESP_LOGE(TAG, "esp_ota_end failed (%s)!", esp_err_to_name(err));
+        }
+    }
+    if (sector) {//cert_sectors and ota partitions
+        printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
+    } else {//buffer
+        printf("data length=%d, buffer=%02x%02x %02x%02x ... %02x%02x %02x%02x\n",collected,
+        buffer[0],buffer[1],buffer[2],buffer[3],buffer[collected-4],
+        buffer[collected-3],buffer[collected-2],buffer[collected-1]);
+    }
+
     UDPLGP("\n"); //UDPLOG
     switch (retc) {
         case  0:
@@ -534,64 +553,15 @@ printf("location=%s\n",found_ptr);
     return collected;
 }
 
-////        printf("code2=%d\n",code);
-////        while (1) {
-////            data_read = esp_http_client_read(client2, http_buffer, BUFFSIZE);
-////            if (data_read < 0) {
-////                ESP_LOGE(TAG, "Error: SSL data read error");
-////                esp_http_client_cleanup(client2);
-////                task_fatal_error();
-////            } else if (data_read > 0) {
-////                if (sector>2) {//ota partitions
-////                    if (!collected) {
-////                        esp_ota_begin(NAME2SECTOR(sector),
-////                        OTA_WITH_SEQUENTIAL_WRITES, &handle);
-////                    }
-////                    esp_ota_write(handle,(const void *)http_buffer,data_read);
-////                } else if (sector) {//cert_sectors
-////                    if (!collected) { //TODO add first byte concept
-////                        esp_partition_erase_range(NAME2SECTOR(sector),0,SECTORSIZE);
-////                    }
-////                    esp_partition_write(NAME2SECTOR(sector),collected,http_buffer,data_read);
-////                } else {//buffer
-////                    memcpy(buffer+collected,http_buffer,data_read);
-////                }
-////                collected+=data_read;
-////            } else if (data_read == 0) {
-////                // As esp_http_client_read never returns negative error code, we rely on
-////                // `errno` to check for underlying transport connectivity closure if any
-////                if (errno == ECONNRESET || errno == ENOTCONN) {
-////                    ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
-////                    break;
-////                }
-////                if (esp_http_client_is_complete_data_received(client2) == true) {
-////                    printf("Transfer Complete: ");
-////                    break;
-////                }
-////            }
-////        }
-////        if (sector>2) {//ota partitions
-////            esp_ota_end(handle);
-////            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
-////        } else if (sector) {//cert_sectors
-////            printf("data length=%d, sector written=%s\n",collected,sectorlabel[sector]);
-////        } else {//buffer
-////            printf("data length=%d, buffer=%02x%02x %02x%02x ... %02x%02x %02x%02x\n",collected,
-////            buffer[0],buffer[1],buffer[2],buffer[3],buffer[collected-4],
-////            buffer[collected-3],buffer[collected-2],buffer[collected-1]);
-////        }
-////        if (esp_http_client_is_complete_data_received(client2) != true) {
-////            ESP_LOGE(TAG, "Error in receiving complete file");
-////            return -5; //TODO check values
-////        }
-////    }
-////    return collected;
-////}
-
 void  ota_finalize_file(int sector) {
     UDPLGP("--- ota_finalize_file\n");
 
-    if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)file_first_byte,1)) UDPLGP("error writing flash\n");
+    if (sector>2) {
+        esp_err_t err = esp_ota_set_boot_partition(NAME2SECTOR(sector));
+        if (err != ESP_OK) ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
+    } else {
+        if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)file_first_byte,1)) UDPLGP("error writing flash\n");
+    }
 //     if (!spiflash_write(sector, file_first_byte, 1)) UDPLGP("error writing flash\n");
     //TODO: add verification and retry and if wrong return status...
 }

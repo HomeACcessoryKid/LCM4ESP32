@@ -107,7 +107,6 @@ void ota_task(void *arg) {
                 ota_get_pubkey(active_cert_sector);
             } //certificates are good now
             
-/*    
 #ifdef OTABOOT    
             //now get the latest ota main software in boot sector 1
             if (ota_get_hash(OTAREPO, ota_version, MAINFILE, &signature)) { //no signature yet
@@ -118,10 +117,11 @@ void ota_task(void *arg) {
                     file_size=ota_get_file(OTAREPO,ota_version,MAINFILE,BOOT1SECTOR);
                     if (file_size<=0) continue; //try again later
                     if (ota_verify_hash(BOOT1SECTOR,&signature)) continue; //download failed
-//                     ota_finalize_file(BOOT1SECTOR);
+                    ota_finalize_file(BOOT1SECTOR);
                 }
             } //now file is here for sure and matches hash
             ota_temp_boot(); //launches the ota software in bootsector 1
+/*    
 #else //NOT OTABOOT    
             UDPLGP("--- running ota-main software\n");
             //is there a newer version of the bootloader...
@@ -164,8 +164,8 @@ void ota_task(void *arg) {
                 } else break; //user did not supply a proper sig file or fake server -> return to boot0
             } //nothing to update
             break; //leads to boot=0 and starts updated user app
-#endif //OTABOOT
 */
+#endif //OTABOOT
         }
     }
     ota_reboot(); //boot0, either the user program or the otaboot app
