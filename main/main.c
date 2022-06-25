@@ -15,12 +15,8 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 // #include "driver/gpio.h"
-#include "protocol_examples_common.h"
+#include "connect.h"
 #include "errno.h"
-
-#if CONFIG_EXAMPLE_CONNECT_WIFI
-#include "esp_wifi.h"
-#endif
 
 #define HASH_LEN 32 /* SHA-256 digest length */
 static const char *TAG = "native_ota_example";
@@ -223,13 +219,6 @@ void app_main(void)
      * examples/protocols/README.md for more information about this function.
      */
     ESP_ERROR_CHECK(example_connect());
-
-#if CONFIG_EXAMPLE_CONNECT_WIFI
-    /* Ensure to disable any WiFi power save mode, this allows best throughput
-     * and hence timings for overall OTA operation.
-     */
-    esp_wifi_set_ps(WIFI_PS_NONE);
-#endif // CONFIG_EXAMPLE_CONNECT_WIFI
 
 //     xTaskCreate(&ota_example_task, "ota_example_task", 8192, NULL, 5, NULL);
     xTaskCreate(&ota_task, "ota_task", 8192, NULL, 5, NULL); //TODO: adjust size and prio?

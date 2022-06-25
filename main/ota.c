@@ -11,12 +11,12 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
-#include "protocol_examples_common.h"
+// #include "protocol_examples_common.h"
 #include "errno.h"
 
-#if CONFIG_EXAMPLE_CONNECT_WIFI
-#include "esp_wifi.h"
-#endif
+// #if CONFIG_EXAMPLE_CONNECT_WIFI
+// #include "esp_wifi.h"
+// #endif
 //===============================
 
 #include "ota.h"
