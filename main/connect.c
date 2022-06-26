@@ -22,8 +22,8 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 
-#define CONFIG_EXAMPLE_WIFI_SSID "xxxxxx"
-#define CONFIG_EXAMPLE_WIFI_PASSWORD "xxxxxx"
+// #define CONFIG_EXAMPLE_WIFI_SSID "xxxxxx"
+// #define CONFIG_EXAMPLE_WIFI_PASSWORD "xxxxxx"
 
 // #if CONFIG_EXAMPLE_WIFI_SCAN_METHOD_FAST
 // #define EXAMPLE_WIFI_SCAN_METHOD WIFI_FAST_SCAN
@@ -185,20 +185,22 @@ static esp_netif_t *wifi_start(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_wifi_disconnect, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, NULL));
 
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = CONFIG_EXAMPLE_WIFI_SSID,
-            .password = CONFIG_EXAMPLE_WIFI_PASSWORD,
-            .scan_method = EXAMPLE_WIFI_SCAN_METHOD,
-            .sort_method = EXAMPLE_WIFI_CONNECT_AP_SORT_METHOD,
-            .threshold.rssi = CONFIG_EXAMPLE_WIFI_SCAN_RSSI_THRESHOLD,
-            .threshold.authmode = EXAMPLE_WIFI_SCAN_AUTH_MODE_THRESHOLD,
-        },
-    };
-    ESP_LOGI(TAG, "Connecting to %s...", wifi_config.sta.ssid);
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
+//     wifi_config_t wifi_config = {
+//         .sta = {
+//             .ssid = CONFIG_EXAMPLE_WIFI_SSID,
+//             .password = CONFIG_EXAMPLE_WIFI_PASSWORD,
+//             .scan_method = EXAMPLE_WIFI_SCAN_METHOD,
+//             .sort_method = EXAMPLE_WIFI_CONNECT_AP_SORT_METHOD,
+//             .threshold.rssi = CONFIG_EXAMPLE_WIFI_SCAN_RSSI_THRESHOLD,
+//             .threshold.authmode = EXAMPLE_WIFI_SCAN_AUTH_MODE_THRESHOLD,
+//         },
+//     };
+// //     wifi_config_t wifi_config; //use this if you want to adjust settings of stored config
+// //     ESP_ERROR_CHECK(esp_wifi_get_config(WIFI_IF_STA, &wifi_config));
+//     ESP_LOGI(TAG, "Connecting to %s...", wifi_config.sta.ssid);
+//     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+//     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     esp_wifi_connect();
     return netif;
