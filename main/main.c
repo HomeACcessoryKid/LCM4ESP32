@@ -33,7 +33,7 @@ static void print_sha256 (const uint8_t *image_hash, const char *label)
 
 
 #include "ota.h"
-
+#include "wifi_config.h"
 
 void ota_task(void *arg) {
     int holdoff_time=1; //32bit, in seconds
@@ -168,6 +168,19 @@ void ota_task(void *arg) {
     vTaskDelete(NULL); //just for completeness sake, would never get till here
 }
 
+
+void on_wifi_ready() {
+    UDPLGP("--- on_wifi_ready\n");
+//     char* ota_srvr=NULL;
+// 
+//     if (ota_emergency(&ota_srvr)){
+//         xTaskCreate(emergency_task,EMERGENCY,4096,ota_srvr,1,NULL);
+//     } else {
+        xTaskCreate(ota_task,"ota",8192,NULL,5,NULL);
+//     }
+}
+
+
 void app_main(void)
 {
     uint8_t sha_256[HASH_LEN] = { 0 };
@@ -214,12 +227,5 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    ESP_ERROR_CHECK(example_connect());
-
-//     xTaskCreate(&ota_example_task, "ota_example_task", 8192, NULL, 5, NULL);
-    xTaskCreate(&ota_task, "ota_task", 8192, NULL, 5, NULL); //TODO: adjust size and prio?
+    wifi_config_init("LCM", NULL, on_wifi_ready);
 }
