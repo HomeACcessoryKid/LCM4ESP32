@@ -32,7 +32,6 @@ typedef struct {
     char *password;
     void (*on_wifi_ready)();
 
-    TickType_t connect_start_time;
     TimerHandle_t sta_connect_timeout;
     TaskHandle_t http_task_handle;
     TaskHandle_t dns_task_handle;
@@ -41,63 +40,19 @@ typedef struct {
 
 static wifi_config_context_t *context;
 
-// 
-// typedef struct _client {
-//     int fd;
-// 
-//     http_parser parser;
-//     endpoint_t endpoint;
-//     uint8_t *body;
-//     size_t body_length;
-// } client_t;
-
-
 static int wifi_config_station_connect();
 static void wifi_config_softap_start();
 static void wifi_config_softap_stop();
-// 
-// static client_t *client_new() {
-//     client_t *client = malloc(sizeof(client_t));
-//     memset(client, 0, sizeof(client_t));
-// 
-//     http_parser_init(&client->parser, HTTP_REQUEST);
-//     client->parser.data = client;
-// 
-//     return client;
-// }
-// 
-// 
-// static void client_free(client_t *client) {
-//     if (client->body)
-//         free(client->body);
-// 
-//     free(client);
-// }
-// 
-// 
-// static void client_send(client_t *client, const char *payload, size_t payload_size) {
-//     lwip_write(client->fd, payload, payload_size);
-// }
-// 
-// 
-// static void client_send_chunk(client_t *client, const char *payload) {
-//     int len = strlen(payload);
-//     char buffer[10];
-//     int buffer_len = snprintf(buffer, sizeof(buffer), "%x\r\n", len);
-//     client_send(client, buffer, buffer_len);
-//     client_send(client, payload, len);
-//     client_send(client, "\r\n", 2);
-// }
-// 
-// 
-// static void client_send_redirect(client_t *client, int code, const char *redirect_url) {
-//     DEBUG("Redirecting to %s", redirect_url);
-//     char buffer[128];
-//     size_t len = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d \r\nLocation: %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", code, redirect_url);
-//     client_send(client, buffer, len);
-// }
-// 
-// 
+
+
+static void client_send_redirect(int fd, int code, const char *redirect_url) {
+    DEBUG("Redirecting to %s", redirect_url);
+    char buffer[128];
+    size_t len = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d \r\nLocation: %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", code, redirect_url);
+    lwip_write(fd, buffer, len);
+}
+
+
 // typedef struct _wifi_network_info {
 //     char ssid[33];
 //     bool secure;
@@ -354,203 +309,197 @@ static void wifi_config_softap_stop();
 //     .on_body = wifi_config_server_on_body,
 //     .on_message_complete = wifi_config_server_on_message_complete,
 // };
-// 
-// 
-// static void http_task(void *arg) {
-//     INFO("Starting HTTP server");
-// 
-//     struct sockaddr_in serv_addr;
-//     int listenfd = socket(AF_INET, SOCK_STREAM, 0);
-//     memset(&serv_addr, '0', sizeof(serv_addr));
-//     serv_addr.sin_family = AF_INET;
-//     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-//     serv_addr.sin_port = htons(WIFI_CONFIG_SERVER_PORT);
-//     int flags;
-//     if ((flags = lwip_fcntl(listenfd, F_GETFL, 0)) < 0) {
-//         ERROR("Failed to get HTTP socket flags");
-//         lwip_close(listenfd);
-//         vTaskDelete(NULL);
-//         return;
-//     };
-//     if (lwip_fcntl(listenfd, F_SETFL, flags | O_NONBLOCK) < 0) {
-//         ERROR("Failed to set HTTP socket flags");
-//         lwip_close(listenfd);
-//         vTaskDelete(NULL);
-//         return;
-//     }
-//     bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-//     listen(listenfd, 2);
-// 
-//     char data[64];
-// 
-//     bool running = true;
-//     while (running) {
-//         uint32_t task_value = 0;
-//         if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
-//             if (task_value) {
-//                 running = false;
-//                 break;
-//             }
-//         }
-// 
-//         int fd = accept(listenfd, (struct sockaddr *)NULL, (socklen_t *)NULL);
-//         if (fd < 0) {
-//             vTaskDelay(500 / portTICK_PERIOD_MS);
-//             continue;
-//         }
-// 
-//         const struct timeval timeout = { 2, 0 }; /* 2 second timeout */
-//         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-// 
-//         client_t *client = client_new();
-//         client->fd = fd;
-// 
-//         for (;;) {
-//             int data_len = lwip_read(client->fd, data, sizeof(data));
-//             DEBUG("lwip_read: %d", data_len);
-// 
-//             if (data_len > 0) {
-// 
-//                 http_parser_execute(
-//                     &client->parser, &wifi_config_http_parser_settings,
-//                     data, data_len
-//                 );
-//             } else {
-//                 break;
-//             }
-// 
-//             if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
-//                 if (task_value) {
-//                     running = false;
-//                     break;
-//                 }
-//             }
-//         }
-// 
-//         INFO("Client disconnected");
-// 
-//         lwip_close(client->fd);
-//         client_free(client);
-//     }
-// 
-//     INFO("Stopping HTTP server");
-// 
-//     lwip_close(listenfd);
-// 
-//     context->http_task_handle=NULL;
-//     vTaskDelete(NULL);
-// }
-// 
-// 
-// static void http_start() {
-//     xTaskCreate(http_task, "wifi_config HTTP", 512, NULL, 2, &context->http_task_handle);
-// }
-// 
-// 
-// static void http_stop() {
-//     if (! context->http_task_handle)
-//         return;
-// 
-//     xTaskNotify(context->http_task_handle, 1, eSetValueWithOverwrite);
-// }
-// 
-// 
-// static void dns_task(void *arg)
-// {
-//     INFO("Starting DNS server");
-// 
-//     ip4_addr_t server_addr;
-//     IP4_ADDR(&server_addr, 192, 168, 4, 1);
-// 
-//     struct sockaddr_in serv_addr;
-//     int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-// 
-//     memset(&serv_addr, '0', sizeof(serv_addr));
-//     serv_addr.sin_family = AF_INET;
-//     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-//     serv_addr.sin_port = htons(53);
-//     bind(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-// 
-//     const struct timeval timeout = { 2, 0 }; /* 2 second timeout */
-//     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-// 
+
+
+static void http_task(void *arg) {
+    INFO("Starting HTTP server");
+
+    struct sockaddr_in serv_addr;
+    int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&serv_addr, '0', sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_port = htons(WIFI_CONFIG_SERVER_PORT);
+    int flags;
+    if ((flags = lwip_fcntl(listenfd, F_GETFL, 0)) < 0) {
+        ERROR("Failed to get HTTP socket flags");
+        lwip_close(listenfd);
+        vTaskDelete(NULL);
+        return;
+    };
+    if (lwip_fcntl(listenfd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        ERROR("Failed to set HTTP socket flags");
+        lwip_close(listenfd);
+        vTaskDelete(NULL);
+        return;
+    }
+    bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+    listen(listenfd, 2);
+
+    char data[1024]; //usually a single request is less than 600?
+
+    bool running = true;
+    while (running) {
+        uint32_t task_value = 0;
+        if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
+            if (task_value) {
+                running = false;
+                break;
+            }
+        }
+
+        int fd = accept(listenfd, (struct sockaddr *)NULL, (socklen_t *)NULL);
+        if (fd < 0) {
+            vTaskDelay(500 / portTICK_PERIOD_MS);
+            continue;
+        }
+
+        const struct timeval timeout = { 2, 0 }; /* 2 second timeout */
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+
+        for (;;) {
+            int data_len = lwip_read(fd, data, sizeof(data));
+            DEBUG("lwip_read: %d", data_len);
+
+            if (data_len > 0) {
+                for (int i=0;i<data_len;i++)printf("%c",data[i]);
+                printf("\n");
+                client_send_redirect(fd, 302, "https://192.168.4.1/settings");
+            } else {
+                break;
+            }
+
+            if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
+                if (task_value) {
+                    running = false;
+                    break;
+                }
+            }
+        }
+
+        INFO("Client disconnected");
+
+        lwip_close(fd);
+    }
+
+    INFO("Stopping HTTP server");
+
+    lwip_close(listenfd);
+
+    context->http_task_handle=NULL;
+    vTaskDelete(NULL);
+}
+
+
+static void http_start() {
+    xTaskCreate(http_task, "wifi_config HTTP", 4096, NULL, 2, &context->http_task_handle);
+}
+
+
+static void http_stop() {
+    if (! context->http_task_handle)
+        return;
+
+    xTaskNotify(context->http_task_handle, 1, eSetValueWithOverwrite);
+}
+
+
+static void dns_task(void *arg) {
+    INFO("Starting DNS server");
+
+    ip4_addr_t server_addr;
+    IP4_ADDR(&server_addr, 192, 168, 4, 1);
+
+    struct sockaddr_in serv_addr;
+    int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+    memset(&serv_addr, '0', sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_port = htons(53);
+    bind(fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+
+    const struct timeval timeout = { 2, 0 }; /* 2 second timeout */
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
 //     const struct ifreq ifreq1 = { "en1" };
 //     setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, &ifreq1, sizeof(ifreq1));
-// 
-//     for (;;) {
-//         char buffer[96];
-//         struct sockaddr src_addr;
-//         socklen_t src_addr_len = sizeof(src_addr);
-//         size_t count = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*)&src_addr, &src_addr_len);
-// 
-//         /* Drop messages that are too large to send a response in the buffer */
-//         if (count > 0 && count <= sizeof(buffer) - 16 && src_addr.sa_family == AF_INET) {
-//             size_t qname_len = strlen(buffer + 12) + 1;
-//             uint32_t reply_len = 2 + 10 + qname_len + 16 + 4;
-// 
-//             char *head = buffer + 2;
-//             *head++ = 0x80; // Flags
-//             *head++ = 0x00;
-//             *head++ = 0x00; // Q count
-//             *head++ = 0x01;
-//             *head++ = 0x00; // A count
-//             *head++ = 0x01;
-//             *head++ = 0x00; // Auth count
-//             *head++ = 0x00;
-//             *head++ = 0x00; // Add count
-//             *head++ = 0x00;
-//             head += qname_len;
-//             *head++ = 0x00; // Q type
-//             *head++ = 0x01;
-//             *head++ = 0x00; // Q class
-//             *head++ = 0x01;
-//             *head++ = 0xC0; // LBL offs
-//             *head++ = 0x0C;
-//             *head++ = 0x00; // Type
-//             *head++ = 0x01;
-//             *head++ = 0x00; // Class
-//             *head++ = 0x01;
-//             *head++ = 0x00; // TTL
-//             *head++ = 0x00;
-//             *head++ = 0x00;
-//             *head++ = 0x78;
-//             *head++ = 0x00; // RD len
-//             *head++ = 0x04;
-//             *head++ = ip4_addr1(&server_addr);
-//             *head++ = ip4_addr2(&server_addr);
-//             *head++ = ip4_addr3(&server_addr);
-//             *head++ = ip4_addr4(&server_addr);
-// 
-//             sendto(fd, buffer, reply_len, 0, &src_addr, src_addr_len);
-//         }
-// 
-//         uint32_t task_value = 0;
-//         if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
-//             if (task_value)
-//                 break;
-//         }
-//     }
-// 
-//     INFO("Stopping DNS server");
-// 
-//     lwip_close(fd);
-// 
-//     context->dns_task_handle=NULL;
-//     vTaskDelete(NULL);
-// }
-// 
-// 
-// static void dns_start() {
-//     xTaskCreate(dns_task, "wifi_config DNS", 384, NULL, 2, &context->dns_task_handle);
-// }
-// 
-// 
-// static void dns_stop() {
-//     if (!context->dns_task_handle)
-//         return;
-// 
-//     xTaskNotify(context->dns_task_handle, 1, eSetValueWithOverwrite);
-// }
+
+    for (;;) {
+        char buffer[96];
+        struct sockaddr src_addr;
+        socklen_t src_addr_len = sizeof(src_addr);
+        size_t count = recvfrom(fd, buffer, sizeof(buffer), 0, (struct sockaddr*)&src_addr, &src_addr_len);
+
+        /* Drop messages that are too large to send a response in the buffer */
+        if (count > 0 && count <= sizeof(buffer) - 16 && src_addr.sa_family == AF_INET) {
+            size_t qname_len = strlen(buffer + 12) + 1;
+            uint32_t reply_len = 2 + 10 + qname_len + 16 + 4;
+
+            char *head = buffer + 2;
+            *head++ = 0x80; // Flags
+            *head++ = 0x00;
+            *head++ = 0x00; // Q count
+            *head++ = 0x01;
+            *head++ = 0x00; // A count
+            *head++ = 0x01;
+            *head++ = 0x00; // Auth count
+            *head++ = 0x00;
+            *head++ = 0x00; // Add count
+            *head++ = 0x00;
+            head += qname_len;
+            *head++ = 0x00; // Q type
+            *head++ = 0x01;
+            *head++ = 0x00; // Q class
+            *head++ = 0x01;
+            *head++ = 0xC0; // LBL offs
+            *head++ = 0x0C;
+            *head++ = 0x00; // Type
+            *head++ = 0x01;
+            *head++ = 0x00; // Class
+            *head++ = 0x01;
+            *head++ = 0x00; // TTL
+            *head++ = 0x00;
+            *head++ = 0x00;
+            *head++ = 0x78;
+            *head++ = 0x00; // RD len
+            *head++ = 0x04;
+            *head++ = ip4_addr1(&server_addr);
+            *head++ = ip4_addr2(&server_addr);
+            *head++ = ip4_addr3(&server_addr);
+            *head++ = ip4_addr4(&server_addr);
+
+            sendto(fd, buffer, reply_len, 0, &src_addr, src_addr_len);
+        }
+
+        uint32_t task_value = 0;
+        if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
+            if (task_value)
+                break;
+        }
+    }
+
+    INFO("Stopping DNS server");
+
+    lwip_close(fd);
+
+    context->dns_task_handle=NULL;
+    vTaskDelete(NULL);
+}
+
+
+static void dns_start() {
+    xTaskCreate(dns_task, "wifi_config DNS", 2048, NULL, 2, &context->dns_task_handle);
+}
+
+
+static void dns_stop() {
+    if (!context->dns_task_handle)
+        return;
+
+    xTaskNotify(context->dns_task_handle, 1, eSetValueWithOverwrite);
+}
 
 
 static void wifi_config_context_free(wifi_config_context_t *context) {
@@ -565,60 +514,54 @@ static void wifi_config_context_free(wifi_config_context_t *context) {
 
 static void wifi_config_softap_start() {
     INFO("Starting AP mode");
-    esp_wifi_set_mode(WIFI_MODE_APSTA); //TODO: does this prevent a flash write if not changed?
-// 
-//     uint8_t macaddr[6];
-//     sdk_wifi_get_macaddr(SOFTAP_IF, macaddr);
-// 
-//     struct sdk_softap_config softap_config;
-//     softap_config.ssid_len = snprintf(
-//         (char *)softap_config.ssid, sizeof(softap_config.ssid),
-//         "%s-%02X%02X%02X", context->ssid_prefix, macaddr[3], macaddr[4], macaddr[5]
-//     );
-//     softap_config.ssid_hidden = 0;
-//     softap_config.channel = 3;
-//     if (context->password) {
-//         softap_config.authmode = AUTH_WPA_WPA2_PSK;
-//         strncpy((char *)softap_config.password,
-//                 context->password, sizeof(softap_config.password));
-//     } else {
-//         softap_config.authmode = AUTH_OPEN;
-//     }
-//     softap_config.max_connection = 2;
-//     softap_config.beacon_interval = 100;
-// 
-//     DEBUG("Starting AP SSID=%s", softap_config.ssid);
-// 
-//     struct ip_info ap_ip;
-//     IP4_ADDR(&ap_ip.ip, 192, 168, 4, 1);
-//     IP4_ADDR(&ap_ip.netmask, 255, 255, 255, 0);
-//     IP4_ADDR(&ap_ip.gw, 0, 0, 0, 0);
-//     sdk_wifi_set_ip_info(SOFTAP_IF, &ap_ip);
-// 
-//     sdk_wifi_softap_set_config(&softap_config);
-// 
-//     ip4_addr_t first_client_ip;
-//     first_client_ip.addr = ap_ip.ip.addr + htonl(1);
-// 
+    esp_wifi_set_mode(WIFI_MODE_APSTA);
+    uint8_t macaddr[6];
+    esp_read_mac(macaddr, ESP_MAC_WIFI_STA);
+    wifi_config_t softap_config = {
+        .ap = {
+            .channel=6,
+            .authmode = WIFI_AUTH_OPEN,
+            .max_connection = 2,
+            .ssid_hidden = 0,
+        },
+    };
+    softap_config.ap.ssid_len = snprintf(
+        (char *)softap_config.ap.ssid, sizeof(softap_config.ap.ssid),
+        "%s-%02X%02X%02X", context->ssid_prefix, macaddr[3], macaddr[4], macaddr[5]
+    );
+    if (context->password) {
+        softap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
+        strncpy((char *)softap_config.ap.password,
+                context->password, sizeof(softap_config.ap.password));
+    }
+    DEBUG("Starting AP SSID=%s", softap_config.ap.ssid);
+
+    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
+    assert(ap_netif);
+
+    esp_netif_ip_info_t ap_ip;
+    IP4_ADDR(&ap_ip.ip, 192, 168, 4, 1);
+    IP4_ADDR(&ap_ip.netmask, 255, 255, 255, 0);
+    IP4_ADDR(&ap_ip.gw, 0, 0, 0, 0);
+    esp_netif_set_ip_info(ap_netif, &ap_ip);
+    INFO("Starting DHCP server");
+    esp_netif_dhcps_start(ap_netif); //all settings seem to be automatic
+    esp_wifi_set_config(ESP_IF_WIFI_AP, &softap_config);
+
 //     wifi_networks_mutex = xSemaphoreCreateBinary();
 //     xSemaphoreGive(wifi_networks_mutex);
 // 
-//     xTaskCreate(wifi_scan_task, "wifi_config scan", 384, NULL, 2, NULL);
+//     xTaskCreate(wifi_scan_task, "wifi_config scan", 2048, NULL, 2, NULL);
 // 
-//     INFO("Starting DHCP server");
-//     dhcpserver_start(&first_client_ip, 4);
-//     dhcpserver_set_router(&ap_ip.ip);
-//     dhcpserver_set_dns(&ap_ip.ip);
-// 
-//     dns_start();
-//     http_start();
+    dns_start();
+    http_start();
 }
 
 
 static void wifi_config_softap_stop() {
 //     dhcpserver_stop();
-//     dns_stop();
-//     http_stop();
+    dns_stop();
+    http_stop();
 //     while (context->dns_task_handle || context->http_task_handle) vTaskDelay(20/ portTICK_PERIOD_MS);
 //     sdk_wifi_set_opmode(STATION_MODE);
     esp_wifi_set_mode(WIFI_MODE_STA); //TODO: does this prevent a flash write if not changed?
@@ -814,6 +757,7 @@ void wifi_config_init(const char *ssid_prefix, const char *password, void (*on_w
 
     context->sta_connect_timeout=xTimerCreate("timer",15000/portTICK_PERIOD_MS,pdFALSE,(void*)context,wifi_config_sta_connect_timeout_callback);
 
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     esp_netif_inherent_config_t esp_netif_config = ESP_NETIF_INHERENT_DEFAULT_WIFI_STA();
@@ -822,7 +766,7 @@ void wifi_config_init(const char *ssid_prefix, const char *password, void (*on_w
     esp_wifi_set_default_wifi_sta_handlers();
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_FLASH));
     esp_wifi_set_mode(WIFI_MODE_STA); //TODO: does this prevent a flash write if not changed?
-
+    esp_wifi_set_country_code("01", 0); //world safe mode
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, NULL));
 
     if (wifi_config_station_connect()) {
