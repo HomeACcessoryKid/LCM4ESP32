@@ -7,6 +7,7 @@
 #include <lwip/sockets.h>
 #include "form_urlencoded.h"
 #include "esp_ota_ops.h"
+#include "esp_https_server.h"
 
 #define WIFI_CONFIG_SERVER_PORT 80
 
@@ -137,7 +138,7 @@ static void client_send_redirect(int fd, int code, const char *redirect_url) {
 //     vTaskDelete(NULL);
 // }
 // 
-// #include "index.html.h"
+#include "index.html.h"
 // 
 // static void wifi_config_server_on_settings(client_t *client) {
 //     char *ota_repo=NULL;
@@ -234,82 +235,136 @@ static void client_send_redirect(int fd, int code, const char *redirect_url) {
 // }
 // 
 // 
-// static int wifi_config_server_on_url(http_parser *parser, const char *data, size_t length) {
-//     client_t *client = (client_t*) parser->data;
-// 
-//     client->endpoint = ENDPOINT_UNKNOWN;
-//     if (parser->method == HTTP_GET) {
-//         if (!strncmp(data, "/settings", length)) {
-//             client->endpoint = ENDPOINT_SETTINGS;
-//         } else if (!strncmp(data, "/", length)) {
-//             client->endpoint = ENDPOINT_INDEX;
-//         }
-//     } else if (parser->method == HTTP_POST) {
-//         if (!strncmp(data, "/settings", length)) {
-//             client->endpoint = ENDPOINT_SETTINGS_UPDATE;
-//         }
-//     }
-// 
-//     if (client->endpoint == ENDPOINT_UNKNOWN) {
-//         char *url = strndup(data, length);
-//         ERROR("Unknown endpoint: %s %s", http_method_str(parser->method), url);
-//         free(url);
-//     }
-// 
-//     return 0;
-// }
-// 
-// 
-// static int wifi_config_server_on_body(http_parser *parser, const char *data, size_t length) {
-//     client_t *client = parser->data;
-//     client->body = realloc(client->body, client->body_length + length + 1);
-//     memcpy(client->body + client->body_length, data, length);
-//     client->body_length += length;
-//     client->body[client->body_length] = 0;
-// 
-//     return 0;
-// }
-// 
-// 
-// static int wifi_config_server_on_message_complete(http_parser *parser) {
-//     client_t *client = parser->data;
-// 
-//     switch(client->endpoint) {
-//         case ENDPOINT_INDEX: {
-//             client_send_redirect(client, 301, "/settings");
-//             break;
-//         }
-//         case ENDPOINT_SETTINGS: {
-//             wifi_config_server_on_settings(client);
-//             break;
-//         }
-//         case ENDPOINT_SETTINGS_UPDATE: {
-//             wifi_config_server_on_settings_update(client);
-//             break;
-//         }
-//         case ENDPOINT_UNKNOWN: {
-//             DEBUG("Unknown endpoint");
-//             client_send_redirect(client, 302, "http://192.168.4.1/settings");
-//             break;
-//         }
-//     }
-// 
-//     if (client->body) {
-//         free(client->body);
-//         client->body = NULL;
-//         client->body_length = 0;
-//     }
-// 
-//     return 0;
-// }
-// 
-// 
-// static http_parser_settings wifi_config_http_parser_settings = {
-//     .on_url = wifi_config_server_on_url,
-//     .on_body = wifi_config_server_on_body,
-//     .on_message_complete = wifi_config_server_on_message_complete,
-// };
 
+
+static esp_err_t post_handler(httpd_req_t *req) {
+    wifi_config_t wifi_config = {
+        .sta = {
+            .scan_method = WIFI_ALL_CHANNEL_SCAN,
+            .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
+            .threshold.authmode = WIFI_AUTH_OPEN,
+            .threshold.rssi = -127,
+        },
+    };
+    char body[512];
+    httpd_req_recv(req,body,512);
+    printf("collected: %s\n",body);
+    form_param_t *form = form_params_parse(body);
+    if (!form) {
+//         client_send_redirect(client, 302, "/settings");
+//         return;
+        return ESP_OK;
+    }
+
+    form_param_t *ssid_param = form_params_find(form, "ssid");
+    form_param_t *password_param = form_params_find(form, "password");
+//     form_param_t *led_pin_param = form_params_find(form, "led_pin");
+//     form_param_t *led_pol_param = form_params_find(form, "led_pol");
+//     form_param_t *otarepo_param = form_params_find(form, "otarepo");
+//     form_param_t *otafile_param = form_params_find(form, "otafile");
+//     form_param_t *otastr_param  = form_params_find(form, "otastr");
+//     form_param_t *otabeta_param = form_params_find(form, "otabeta");
+//     form_param_t *otasrvr_param = form_params_find(form, "otasrvr");
+
+    if (!ssid_param) {
+        form_params_free(form);
+//         client_send_redirect(client, 302, "/settings");
+//         return;
+        return ESP_OK;
+    }
+
+    httpd_resp_set_status(req,HTTPD_204);
+    httpd_resp_send(req, NULL, 0);
+
+    strlcpy((char*)wifi_config.sta.ssid,ssid_param->value,32);
+
+    if (password_param) { //if password, enforce WPA2_PSK minimum
+        strlcpy((char*)wifi_config.sta.password,password_param->value,64);
+        wifi_config.sta.threshold.authmode=WIFI_AUTH_WPA2_PSK;
+    } else {
+        wifi_config.sta.password[0]=0;
+        wifi_config.sta.threshold.authmode=WIFI_AUTH_OPEN;
+    }
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+
+//     if (led_pin_param && led_pin_param->value && led_pol_param && led_pol_param->value) {
+//         if (strcmp(led_pin_param->value,"n")) 
+//              sysparam_set_int8("led_pin", (strcmp(led_pol_param->value,"1")?1:-1) * atoi(led_pin_param->value));
+//         else if (!strcmp(led_pol_param->value,"1")) sysparam_set_data("led_pin", NULL,0,0); //wipe only if "n" and ledpol=1
+//     }
+//     if (otarepo_param && otarepo_param->value) sysparam_set_string("ota_repo", otarepo_param->value);
+//     if (otafile_param && otafile_param->value) sysparam_set_string("ota_file", otafile_param->value);
+//     if (otastr_param  && otastr_param->value) sysparam_set_string("ota_string", otastr_param->value);
+//     if (otabeta_param && otabeta_param->value) sysparam_set_bool("ota_beta", otabeta_param->value[0]-0x30);
+//     if (otasrvr_param && otasrvr_param->value && strcmp(otasrvr_param->value,"not.github.com/somewhere/"))
+//                                                sysparam_set_string("ota_srvr", otasrvr_param->value);
+    form_params_free(form);
+
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+
+    wifi_config_station_connect();
+    
+    return ESP_OK;
+}
+
+static esp_err_t get_handler(httpd_req_t *req) {
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    httpd_resp_send_chunk(req, html_settings_header,        HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, html_settings_middle,        HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, html_settings_otaparameters, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, html_settings_otaserver,     HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, html_settings_footer,        HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req, NULL, 0);
+    return ESP_OK;
+}
+
+static const httpd_uri_t settings_get = {
+    .uri       = "/settings",
+    .method    = HTTP_GET,
+    .handler   = get_handler
+};
+
+static const httpd_uri_t settings_post = {
+    .uri       = "/settings",
+    .method    = HTTP_POST,
+    .handler   = post_handler
+};
+
+httpd_handle_t https_server = NULL;
+static void https_start() {
+    if (https_server == NULL) {
+        INFO("Starting HTTPS server");
+
+        httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
+
+        extern const unsigned char cacert_pem_start[] asm("_binary_cacert_pem_start");
+        extern const unsigned char cacert_pem_end[]   asm("_binary_cacert_pem_end");
+        conf.cacert_pem = cacert_pem_start;
+        conf.cacert_len = cacert_pem_end - cacert_pem_start;
+
+        extern const unsigned char prvtkey_pem_start[] asm("_binary_prvtkey_pem_start");
+        extern const unsigned char prvtkey_pem_end[]   asm("_binary_prvtkey_pem_end");
+        conf.prvtkey_pem = prvtkey_pem_start;
+        conf.prvtkey_len = prvtkey_pem_end - prvtkey_pem_start;
+
+        esp_err_t ret = httpd_ssl_start(&https_server, &conf);
+        if (ret == ESP_OK) {
+            // Set URI handlers
+            INFO("Registering URI handlers");
+            httpd_register_uri_handler(https_server, &settings_get);
+            httpd_register_uri_handler(https_server, &settings_post);
+        } else {
+            INFO("Error starting HTTPS server!");
+        }
+    }
+}
+
+static void https_stop() {
+    if (https_server) {
+        httpd_ssl_stop(https_server);
+        https_server = NULL;
+    }
+}
 
 static void http_task(void *arg) {
     INFO("Starting HTTP server");
@@ -555,17 +610,19 @@ static void wifi_config_softap_start() {
 // 
     dns_start();
     http_start();
+    https_start();
 }
 
 
 static void wifi_config_softap_stop() {
 //     dhcpserver_stop();
+    INFO("Stopping AP mode");
     dns_stop();
     http_stop();
-//     while (context->dns_task_handle || context->http_task_handle) vTaskDelay(20/ portTICK_PERIOD_MS);
-//     sdk_wifi_set_opmode(STATION_MODE);
-    esp_wifi_set_mode(WIFI_MODE_STA); //TODO: does this prevent a flash write if not changed?
-    INFO("Stopping AP mode");
+    https_stop();
+    while (context->dns_task_handle || context->http_task_handle || https_server) vTaskDelay(20/ portTICK_PERIOD_MS);
+    esp_wifi_set_mode(WIFI_MODE_STA);
+    INFO("Stopped AP mode");
 }
 
 
@@ -585,8 +642,7 @@ static int wifi_config_station_connect() {
     }
     INFO("Found configuration, connecting to %s", wifi_config.sta.ssid);
 
-    esp_wifi_set_mode(WIFI_MODE_STA); //TODO: does this prevent a flash write if not changed?
-    ESP_ERROR_CHECK(esp_wifi_start());
+//     ESP_ERROR_CHECK(esp_wifi_start());
 
     esp_wifi_connect();
     
@@ -769,6 +825,7 @@ void wifi_config_init(const char *ssid_prefix, const char *password, void (*on_w
     esp_wifi_set_country_code("01", 0); //world safe mode
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, NULL));
 
+    ESP_ERROR_CHECK(esp_wifi_start()); //TODO: is this the right place
     if (wifi_config_station_connect()) {
         xTaskCreate(serial_input,"serial" ,2048,NULL,1,&xHandle);
         xTaskCreate(timeout_task,"timeout",2048,xHandle,1,NULL);

@@ -11,6 +11,11 @@ idf.py all
 works, but painfull
 
 
+idf.py reconfigure re-runs CMake even if it doesn’t seem to need re-running.
+This isn’t necessary during normal usage, but can be useful after adding/removing files from the source tree,
+or when modifying CMake cache variables.
+For example, `idf.py -DNAME='VALUE' reconfigure` can be used to set variable NAME in CMake cache to value VALUE
+
 
 to flash use this command
     esptool.py --chip esp32 --port /dev/cu.usbserial* --baud 460800 --before default_reset --after hard_reset \
@@ -35,3 +40,5 @@ idf.py fullclean (only once)
 ln -s /mnt build/esp-idf
 idf.py fullclean
 rm -rd /mnt/*
+
+idf.py -B <dir> allows overriding the build directory from the default build subdirectory of the project directory
