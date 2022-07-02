@@ -20,20 +20,13 @@
 #define ERROR(message, ...) printf("!!! wifi_config: " message "\n", ##__VA_ARGS__);
 
 
-typedef enum {
-    ENDPOINT_UNKNOWN = 0,
-    ENDPOINT_INDEX,
-    ENDPOINT_SETTINGS,
-    ENDPOINT_SETTINGS_UPDATE,
-} endpoint_t;
-
-
 typedef struct {
     char *ssid_prefix;
     char *password;
     void (*on_wifi_ready)();
 
     TimerHandle_t sta_connect_timeout;
+    TaskHandle_t https_task_handle;
     TaskHandle_t http_task_handle;
     TaskHandle_t dns_task_handle;
 } wifi_config_context_t;
@@ -44,14 +37,6 @@ static wifi_config_context_t *context;
 static int wifi_config_station_connect();
 static void wifi_config_softap_start();
 static void wifi_config_softap_stop();
-
-
-static void client_send_redirect(int fd, int code, const char *redirect_url) {
-    DEBUG("Redirecting to %s", redirect_url);
-    char buffer[128];
-    size_t len = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d \r\nLocation: %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", code, redirect_url);
-    lwip_write(fd, buffer, len);
-}
 
 
 // typedef struct _wifi_network_info {
@@ -330,40 +315,60 @@ static const httpd_uri_t settings_post = {
     .handler   = post_handler
 };
 
-httpd_handle_t https_server = NULL;
-static void https_start() {
-    if (https_server == NULL) {
-        INFO("Starting HTTPS server");
+static void https_task(void *arg) {
+    INFO("Starting HTTPS server");
+    httpd_handle_t https_server = NULL;
+    httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
 
-        httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
+    extern const unsigned char cacert_pem_start[] asm("_binary_cacert_pem_start");
+    extern const unsigned char cacert_pem_end[]   asm("_binary_cacert_pem_end");
+    conf.cacert_pem = cacert_pem_start;
+    conf.cacert_len = cacert_pem_end - cacert_pem_start;
 
-        extern const unsigned char cacert_pem_start[] asm("_binary_cacert_pem_start");
-        extern const unsigned char cacert_pem_end[]   asm("_binary_cacert_pem_end");
-        conf.cacert_pem = cacert_pem_start;
-        conf.cacert_len = cacert_pem_end - cacert_pem_start;
+    extern const unsigned char prvtkey_pem_start[] asm("_binary_prvtkey_pem_start");
+    extern const unsigned char prvtkey_pem_end[]   asm("_binary_prvtkey_pem_end");
+    conf.prvtkey_pem = prvtkey_pem_start;
+    conf.prvtkey_len = prvtkey_pem_end - prvtkey_pem_start;
 
-        extern const unsigned char prvtkey_pem_start[] asm("_binary_prvtkey_pem_start");
-        extern const unsigned char prvtkey_pem_end[]   asm("_binary_prvtkey_pem_end");
-        conf.prvtkey_pem = prvtkey_pem_start;
-        conf.prvtkey_len = prvtkey_pem_end - prvtkey_pem_start;
-
-        esp_err_t ret = httpd_ssl_start(&https_server, &conf);
-        if (ret == ESP_OK) {
-            // Set URI handlers
-            INFO("Registering URI handlers");
-            httpd_register_uri_handler(https_server, &settings_get);
-            httpd_register_uri_handler(https_server, &settings_post);
-        } else {
-            INFO("Error starting HTTPS server!");
+    esp_err_t ret = httpd_ssl_start(&https_server, &conf);
+    if (ret == ESP_OK) {
+        httpd_register_uri_handler(https_server, &settings_get);
+        httpd_register_uri_handler(https_server, &settings_post);
+    } else {
+        INFO("Error starting HTTPS server!");
+    }
+    
+    bool running = true;
+    while (running) {
+        uint32_t task_value = 0;
+        if (xTaskNotifyWait(0, 1, &task_value, 1) == pdTRUE) {
+            if (task_value) {
+                running = false;
+                break;
+            }
         }
     }
+    INFO("Stopping HTTPS server");
+    if (https_server) httpd_ssl_stop(https_server);
+    context->https_task_handle=NULL;
+    vTaskDelete(NULL);
+}
+
+static void https_start() {
+    xTaskCreate(https_task, "wcHTTPS", 4096, NULL, 2, &context->https_task_handle);
 }
 
 static void https_stop() {
-    if (https_server) {
-        httpd_ssl_stop(https_server);
-        https_server = NULL;
-    }
+    if (! context->https_task_handle) return;
+    xTaskNotify(context->https_task_handle, 1, eSetValueWithOverwrite);
+}
+
+
+static void client_send_redirect(int fd, int code, const char *redirect_url) {
+    INFO("Redirecting to %s", redirect_url);
+    char buffer[128];
+    size_t len = snprintf(buffer, sizeof(buffer), "HTTP/1.1 %d \r\nLocation: %s\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", code, redirect_url);
+    lwip_write(fd, buffer, len);
 }
 
 static void http_task(void *arg) {
@@ -415,15 +420,9 @@ static void http_task(void *arg) {
 
         for (;;) {
             int data_len = lwip_read(fd, data, sizeof(data));
-            DEBUG("lwip_read: %d", data_len);
-
             if (data_len > 0) {
-                for (int i=0;i<data_len;i++)printf("%c",data[i]);
-                printf("\n");
                 client_send_redirect(fd, 302, "https://192.168.4.1/settings");
-            } else {
-                break;
-            }
+            } else break;
 
             if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
                 if (task_value) {
@@ -432,30 +431,21 @@ static void http_task(void *arg) {
                 }
             }
         }
-
         INFO("Client disconnected");
-
         lwip_close(fd);
     }
-
     INFO("Stopping HTTP server");
-
     lwip_close(listenfd);
-
     context->http_task_handle=NULL;
     vTaskDelete(NULL);
 }
 
-
 static void http_start() {
-    xTaskCreate(http_task, "wifi_config HTTP", 4096, NULL, 2, &context->http_task_handle);
+    xTaskCreate(http_task, "wcHTTP", 4096, NULL, 2, &context->http_task_handle);
 }
 
-
 static void http_stop() {
-    if (! context->http_task_handle)
-        return;
-
+    if (! context->http_task_handle) return;
     xTaskNotify(context->http_task_handle, 1, eSetValueWithOverwrite);
 }
 
@@ -543,16 +533,12 @@ static void dns_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-
 static void dns_start() {
-    xTaskCreate(dns_task, "wifi_config DNS", 2048, NULL, 2, &context->dns_task_handle);
+    xTaskCreate(dns_task, "wcDNS", 2048, NULL, 2, &context->dns_task_handle);
 }
 
-
 static void dns_stop() {
-    if (!context->dns_task_handle)
-        return;
-
+    if (!context->dns_task_handle) return;
     xTaskNotify(context->dns_task_handle, 1, eSetValueWithOverwrite);
 }
 
@@ -568,6 +554,11 @@ static void wifi_config_context_free(wifi_config_context_t *context) {
 }
 
 static void wifi_config_softap_start() {
+    wifi_mode_t mode; esp_wifi_get_mode(&mode);
+    if (mode==WIFI_MODE_APSTA) {
+        INFO("AP mode already started");
+        return;
+    }
     INFO("Starting AP mode");
     esp_wifi_set_mode(WIFI_MODE_APSTA);
     uint8_t macaddr[6];
@@ -589,7 +580,7 @@ static void wifi_config_softap_start() {
         strncpy((char *)softap_config.ap.password,
                 context->password, sizeof(softap_config.ap.password));
     }
-    DEBUG("Starting AP SSID=%s", softap_config.ap.ssid);
+    INFO("Starting AP SSID=%s", softap_config.ap.ssid);
 
     esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
     assert(ap_netif);
@@ -616,18 +607,20 @@ static void wifi_config_softap_start() {
 
 static void wifi_config_softap_stop() {
 //     dhcpserver_stop();
+    wifi_mode_t mode; esp_wifi_get_mode(&mode);
+    if (mode==WIFI_MODE_STA) return;
     INFO("Stopping AP mode");
     dns_stop();
     http_stop();
     https_stop();
-    while (context->dns_task_handle || context->http_task_handle || https_server) vTaskDelay(20/ portTICK_PERIOD_MS);
+    while (context->dns_task_handle || context->http_task_handle || context->https_task_handle) vTaskDelay(20/ portTICK_PERIOD_MS);
     esp_wifi_set_mode(WIFI_MODE_STA);
     INFO("Stopped AP mode");
 }
 
 
 static void wifi_config_sta_connect_timeout_callback(TimerHandle_t context) {    
-    DEBUG("Timeout connecting to WiFi network, starting config AP");
+    INFO("Timeout connecting to WiFi network, starting config AP");
     // Not connected to station, launch configuration AP
     wifi_config_softap_start();
 }
@@ -637,13 +630,10 @@ static int wifi_config_station_connect() {
     wifi_config_t wifi_config;
     esp_wifi_get_config(WIFI_IF_STA, &wifi_config);
     if (wifi_config.sta.ssid[0]==0) {
-        DEBUG("No configuration found");
+        INFO("No configuration found");
         return -1;
     }
-    INFO("Found configuration, connecting to %s", wifi_config.sta.ssid);
-
-//     ESP_ERROR_CHECK(esp_wifi_start());
-
+    INFO("Found configuration, trying to connect to %s", wifi_config.sta.ssid);
     esp_wifi_connect();
     
     xTimerStart(context->sta_connect_timeout,0);
@@ -825,7 +815,7 @@ void wifi_config_init(const char *ssid_prefix, const char *password, void (*on_w
     esp_wifi_set_country_code("01", 0); //world safe mode
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &on_got_ip, NULL));
 
-    ESP_ERROR_CHECK(esp_wifi_start()); //TODO: is this the right place
+    ESP_ERROR_CHECK(esp_wifi_start()); //TODO: is this the right place?
     if (wifi_config_station_connect()) {
         xTaskCreate(serial_input,"serial" ,2048,NULL,1,&xHandle);
         xTaskCreate(timeout_task,"timeout",2048,xHandle,1,NULL);
