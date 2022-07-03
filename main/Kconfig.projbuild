@@ -2,7 +2,7 @@ menu "LCM4ESP32 Configuration"
 
     config LCM_REPO
         string "User Repo"
-        default "HomeACcessorykid/lcmdemo"
+        default "HomeACcessorykid/lcm-demo"
         help
             name of the repo with the user firmware image.
 

@@ -15,7 +15,6 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 // #include "driver/gpio.h"
-#include "connect.h"
 #include "errno.h"
 
 #define HASH_LEN 32 /* SHA-256 digest length */
