@@ -45,8 +45,8 @@ static const char *TAG = "LCM";
 /*an ota data write buffer ready to write to the flash*/
 
 char sectorlabel[][10]={"buffer","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
-bool userbeta=0;
-bool otabeta=0;
+uint8_t userbeta=0;
+uint8_t otabeta=0;
 // int8_t led=16;
 static byte file_first_byte[]={0xff};
 
@@ -54,6 +54,26 @@ static void __attribute__((noreturn)) task_fatal_error(void){
     ESP_LOGE(TAG, "Exiting task due to fatal error...");
     (void)vTaskDelete(NULL);
     while (1) {;}
+}
+
+nvs_handle_t lcm_handle;
+void  ota_nvs_init() {
+    esp_err_t err = nvs_flash_init(); // Initialize NVS
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // OTA app partition table has a smaller NVS partition size than the non-OTA
+        // partition table. This size mismatch may cause NVS initialization to fail.
+        // If this happens, we erase NVS partition and initialize NVS again.
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    nvs_stats_t nvs_stats;
+    nvs_get_stats(NULL, &nvs_stats);
+    printf("Count: UsedEntries = (%d), FreeEntries = (%d), AllEntries = (%d)\n",
+           nvs_stats.used_entries, nvs_stats.free_entries, nvs_stats.total_entries);
+
+    nvs_open("LCM",NVS_READWRITE,&lcm_handle);
 }
 
 char *ota_strstr(const char *full_string, const char *search) { //lowercase version of strstr()
@@ -155,14 +175,10 @@ void  ota_init() {
 
     int size=0;
     byte abyte[1];
-//     sysparam_get_bool("lcm_beta", &otabeta);
-//     sysparam_get_bool("ota_beta", &userbeta);
+    nvs_get_u8(lcm_handle,"lcm_beta", &otabeta);
+    nvs_get_u8(lcm_handle,"ota_beta", &userbeta);
     UDPLGP("userbeta=\'%d\' otabeta=\'%d\'\n",userbeta,otabeta);
-
-//     ip_addr_t target_ip;
-//     int ret;
     
-//     sysparam_status_t status;
 //     uint8_t led_info=0;
 // 
 //     status = sysparam_get_int8("led_pin", &led);
@@ -223,27 +239,29 @@ void  ota_init() {
 
 int   ota_load_user_app(char * *repo, char * *version, char * *file) {
     UDPLGP("--- ota_load_user_app\n");
-//     sysparam_status_t status;
-//     char *value;
-// 
-//     status = sysparam_get_string("ota_repo", &value);
-//     if (status == SYSPARAM_OK) {
-//         *repo=value;
-//     } else return -1;
-//     status = sysparam_get_string("ota_version", &value);
-//     if (status == SYSPARAM_OK) {
-//         *version=value;
-//     } else {
-//         *version=malloc(6);
-//         strcpy(*version,"0.0.0");
-//     }
-//     status = sysparam_get_string("ota_file", &value);
-//     if (status == SYSPARAM_OK) {
-//         *file=value;
-//     } else return -1;
-    *repo="HomeACcessoryKid/life-cycle-manager";
-    *version="0.0.1";
-    *file="otaboot.bin";
+
+    size_t size;
+    char* value=NULL;
+    if (nvs_get_str(lcm_handle,"ota_repo", NULL,   &size)==ESP_OK) {
+        value = malloc(size);
+        nvs_get_str(lcm_handle,"ota_repo", value, &size);
+        *repo=value;
+    } else return -1;
+
+    if (nvs_get_str(lcm_handle,"ota_file", NULL,   &size)==ESP_OK) {
+        value = malloc(size);
+        nvs_get_str(lcm_handle,"ota_file", value, &size);
+        *file=value;
+    } else return -1;
+
+    if (nvs_get_str(lcm_handle,"ota_version", NULL,   &size)==ESP_OK) {
+        value = malloc(size);
+        nvs_get_str(lcm_handle,"ota_version", value, &size);
+        *version=value;
+    } else {
+        *version=malloc(6);
+        strcpy(*version,"0.0.0");
+    }
 
     UDPLGP("user_repo=\'%s\' user_version=\'%s\' user_file=\'%s\'\n",*repo,*version,*file);
     return 0;
@@ -823,7 +841,8 @@ void  ota_swap_cert_sector() {
 void  ota_write_status(char * version) {
     UDPLGP("--- ota_write_status\n");
     
-//     sysparam_set_string("ota_version", version);
+    nvs_set_str(lcm_handle,"ota_version", version);
+    nvs_commit( lcm_handle);
 }
 
 int   ota_boot(void) {

@@ -10,7 +10,7 @@
 //  #error You must set OTAVERSION=x.y.z of the ota code to match github version tag x.y.z
 // #endif
 #define OTAREPO  CONFIG_LCM_GITREPO
-#define MAINFILE "LCM4ESP32.bin"
+#define MAINFILE "otamain.bin"
 #define BOOTFILE "otaboot.bin"
 #define CERTFILE "certs.sector"
 #define HOLDOFF_MULTIPLIER 20   //more like 20  -> 20s,400 (~6min),8000 (~2h),160000 (~2days)
@@ -53,6 +53,8 @@ int active_cert_sector;
 int backup_cert_sector;
 
 void  ota_read_rtc();
+
+void  ota_nvs_init();
 
 void  ota_active_sector();
 

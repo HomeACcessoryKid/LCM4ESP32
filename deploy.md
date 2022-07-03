@@ -42,3 +42,14 @@ idf.py fullclean
 rm -rd /mnt/*
 
 idf.py -B <dir> allows overriding the build directory from the default build subdirectory of the project directory
+
+
+
+
+~/bin/ecc_signer otaboot.bin ../secp384r1prv.der ../secp384r1pub.der
+printf "%08x" `cat otaboot.bin | wc -c`| xxd -r -p > len
+cat hash len sign > otaboot.bin.sig
+~/bin/ecc_signer otamain.bin ../secp384r1prv.der ../secp384r1pub.der
+printf "%08x" `cat otamain.bin | wc -c`| xxd -r -p > len
+cat hash len sign > otamain.bin.sig
+rm hash len sign

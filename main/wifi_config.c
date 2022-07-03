@@ -8,6 +8,7 @@
 #include "form_urlencoded.h"
 #include "esp_ota_ops.h"
 #include "esp_https_server.h"
+#include "nvs.h"
 
 #define WIFI_CONFIG_SERVER_PORT 80
 
@@ -31,6 +32,7 @@ typedef struct {
     TaskHandle_t dns_task_handle;
 } wifi_config_context_t;
 
+extern nvs_handle_t lcm_handle;
 
 static wifi_config_context_t *context;
 
@@ -241,15 +243,15 @@ static esp_err_t post_handler(httpd_req_t *req) {
         return ESP_OK;
     }
 
-    form_param_t *ssid_param = form_params_find(form, "ssid");
-    form_param_t *password_param = form_params_find(form, "password");
+    form_param_t *ssid_param    = form_params_find(form, "ssid");
+    form_param_t *password_param= form_params_find(form, "password");
 //     form_param_t *led_pin_param = form_params_find(form, "led_pin");
 //     form_param_t *led_pol_param = form_params_find(form, "led_pol");
-//     form_param_t *otarepo_param = form_params_find(form, "otarepo");
-//     form_param_t *otafile_param = form_params_find(form, "otafile");
-//     form_param_t *otastr_param  = form_params_find(form, "otastr");
-//     form_param_t *otabeta_param = form_params_find(form, "otabeta");
-//     form_param_t *otasrvr_param = form_params_find(form, "otasrvr");
+    form_param_t *otarepo_param = form_params_find(form, "otarepo");
+    form_param_t *otafile_param = form_params_find(form, "otafile");
+    form_param_t *otastr_param  = form_params_find(form, "otastr");
+    form_param_t *otabeta_param = form_params_find(form, "otabeta");
+    form_param_t *otasrvr_param = form_params_find(form, "otasrvr");
 
     if (!ssid_param) {
         form_params_free(form);
@@ -258,7 +260,7 @@ static esp_err_t post_handler(httpd_req_t *req) {
         return ESP_OK;
     }
 
-    httpd_resp_set_status(req,HTTPD_204);
+    httpd_resp_set_status(req,HTTPD_204); //TODO: better some user feedback?
     httpd_resp_send(req, NULL, 0);
 
     strlcpy((char*)wifi_config.sta.ssid,ssid_param->value,32);
@@ -277,12 +279,13 @@ static esp_err_t post_handler(httpd_req_t *req) {
 //              sysparam_set_int8("led_pin", (strcmp(led_pol_param->value,"1")?1:-1) * atoi(led_pin_param->value));
 //         else if (!strcmp(led_pol_param->value,"1")) sysparam_set_data("led_pin", NULL,0,0); //wipe only if "n" and ledpol=1
 //     }
-//     if (otarepo_param && otarepo_param->value) sysparam_set_string("ota_repo", otarepo_param->value);
-//     if (otafile_param && otafile_param->value) sysparam_set_string("ota_file", otafile_param->value);
-//     if (otastr_param  && otastr_param->value) sysparam_set_string("ota_string", otastr_param->value);
-//     if (otabeta_param && otabeta_param->value) sysparam_set_bool("ota_beta", otabeta_param->value[0]-0x30);
-//     if (otasrvr_param && otasrvr_param->value && strcmp(otasrvr_param->value,"not.github.com/somewhere/"))
-//                                                sysparam_set_string("ota_srvr", otasrvr_param->value);
+    if (otarepo_param && otarepo_param->value) nvs_set_str(lcm_handle,"ota_repo", otarepo_param->value);
+    if (otafile_param && otafile_param->value) nvs_set_str(lcm_handle,"ota_file", otafile_param->value);
+    if (otastr_param  && otastr_param->value)  nvs_set_str(lcm_handle,"ota_string",otastr_param->value);
+    if (otabeta_param && otabeta_param->value) nvs_set_u8( lcm_handle,"ota_beta", otabeta_param->value[0]-0x30);
+    if (otasrvr_param && otasrvr_param->value && strcmp(otasrvr_param->value,"not.github.com/somewhere/"))
+                                               nvs_set_str(lcm_handle,"ota_srvr", otasrvr_param->value);
+    nvs_commit(lcm_handle);
     form_params_free(form);
 
     vTaskDelay(500 / portTICK_PERIOD_MS);

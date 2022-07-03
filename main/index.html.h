@@ -96,7 +96,7 @@ const char *html_settings_middle =
 const char *html_settings_otaparameters = 
 "            <div class=\"field otarepo\" style=\"display: block;\">"
 "                <label for=\"otarepo\">OTA repository:</label>"
-"                <input type=\"text\" id=\"otarepo\" name=\"otarepo\" value=\"HomeACcessoryKid/ota-demo\" />"
+"                <input type=\"text\" id=\"otarepo\" name=\"otarepo\" value=\"HomeACcessoryKid/lcm-demo\" />"
 "            </div>"
 "            <div class=\"field otafile\" style=\"display: block;\">"
 "                <label for=\"otafile\">OTA binary file:</label>"
