@@ -171,6 +171,7 @@ void  ota_set_verify(int onoff) {
 }
 
 void  ota_init() {
+    UDPLGP("--- %s version %s\n",esp_ota_get_app_description()->project_name,esp_ota_get_app_description()->version);
     UDPLGP("--- ota_init\n");
 
     int size=0;
@@ -242,19 +243,19 @@ int   ota_load_user_app(char * *repo, char * *version, char * *file) {
 
     size_t size;
     char* value=NULL;
-    if (nvs_get_str(lcm_handle,"ota_repo", NULL,   &size)==ESP_OK) {
+    if (nvs_get_str(lcm_handle,"ota_repo", NULL,  &size)==ESP_OK) {
         value = malloc(size);
         nvs_get_str(lcm_handle,"ota_repo", value, &size);
         *repo=value;
     } else return -1;
 
-    if (nvs_get_str(lcm_handle,"ota_file", NULL,   &size)==ESP_OK) {
+    if (nvs_get_str(lcm_handle,"ota_file", NULL,  &size)==ESP_OK) {
         value = malloc(size);
         nvs_get_str(lcm_handle,"ota_file", value, &size);
         *file=value;
     } else return -1;
 
-    if (nvs_get_str(lcm_handle,"ota_version", NULL,   &size)==ESP_OK) {
+    if (nvs_get_str(lcm_handle,"ota_version", NULL,  &size)==ESP_OK) {
         value = malloc(size);
         nvs_get_str(lcm_handle,"ota_version", value, &size);
         *version=value;
@@ -265,6 +266,44 @@ int   ota_load_user_app(char * *repo, char * *version, char * *file) {
 
     UDPLGP("user_repo=\'%s\' user_version=\'%s\' user_file=\'%s\'\n",*repo,*version,*file);
     return 0;
+}
+
+int ota_compare(char* newv, char* oldv) { //(if equal,0) (if newer,1) (if pre-release or older,-1)
+    UDPLGP("--- ota_compare ");
+    printf("\n");
+    char* dot;
+    int valuen=0,valueo=0;
+    char news[MAXVERSIONLEN],olds[MAXVERSIONLEN];
+    char * new=news;
+    char * old=olds;
+    int result=0;
+    
+    if (strcmp(newv,oldv)) { //https://semver.org/#spec-item-11
+        do {
+            if (strchr(newv,'-')) {result=-1;break;} //we cannot handle versions with pre-release suffix notation (yet)
+            //pre-release marker in github serves to identify those
+            strncpy(new,newv,MAXVERSIONLEN-1);
+            strncpy(old,oldv,MAXVERSIONLEN-1);
+            if ((dot=strchr(new,'.'))) {dot[0]=0; valuen=atoi(new); new=dot+1;}
+            if ((dot=strchr(old,'.'))) {dot[0]=0; valueo=atoi(old); old=dot+1;}
+            printf("%d-%d,%s-%s\n",valuen,valueo,new,old);
+            if (valuen>valueo) {result= 1;break;}
+            if (valuen<valueo) {result=-1;break;}
+            valuen=valueo=0;
+            if ((dot=strchr(new,'.'))) {dot[0]=0; valuen=atoi(new); new=dot+1;}
+            if ((dot=strchr(old,'.'))) {dot[0]=0; valueo=atoi(old); old=dot+1;}
+            printf("%d-%d,%s-%s\n",valuen,valueo,new,old);
+            if (valuen>valueo) {result= 1;break;}
+            if (valuen<valueo) {result=-1;break;}
+            valuen=atoi(new);
+            valueo=atoi(old);
+            printf("%d-%d\n",valuen,valueo);
+            if (valuen>valueo) {result= 1;break;}
+            if (valuen<valueo) {result=-1;break;}        
+        } while(0);
+    } //they are equal
+    UDPLGP("%s with %s=%d\n",newv,oldv,result);
+    return result;
 }
 
 static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtls_ssl_context *ssl) {
@@ -394,7 +433,6 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             //if (found_ptr[0] == ' ') found_ptr++;
             found_ptr+=8; //flush https://
             //printf("location=%s\n",found_ptr);
-printf("location=%s\n",found_ptr);
         } else {
             UDPLGP("failed, return [-0x%x]\n", -ret);
 //             ret=wolfSSL_get_error(ssl,ret);
@@ -426,7 +464,7 @@ printf("location=%s\n",found_ptr);
     strcat(found_ptr, REQUESTTAIL);
     slash=strchr(found_ptr,'/')-found_ptr;
     found_ptr[slash]=0; //cut behind the hostname
-    char * host2=malloc(strlen(found_ptr));
+    char * host2=malloc(strlen(found_ptr)+1);
     strcpy(host2,found_ptr);
     //printf("next host: %s\n",host2);
 
@@ -435,7 +473,7 @@ printf("location=%s\n",found_ptr);
     strcat(strcat(found_ptr+slash+1,host2),RANGE); //append hostname and range to URI    
     found_ptr+=slash-4;
     memcpy(found_ptr,REQUESTHEAD,5);
-    char * getlinestart=malloc(strlen(found_ptr));
+    char * getlinestart=malloc(strlen(found_ptr)+1);
     strcpy(getlinestart,found_ptr);
     //printf("request:\n%s\n",getlinestart);
     //if (!retc) {
@@ -656,7 +694,7 @@ char* ota_get_version(char * repo) {
             strchr(found_ptr,'\r')[0]=0;
             found_ptr=ota_strstr(recv_buf,"releases/tag/");
             if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
-            version=malloc(strlen(found_ptr+13));
+            version=malloc(strlen(found_ptr+13)+1);
             strcpy(version,found_ptr+13);
             printf("%s@version:\"%s\" according to latest release\n",repo,version);
         } else {
@@ -860,6 +898,7 @@ void  ota_temp_boot(void) {
     UDPLGP("--- ota_temp_boot\n");
     
 //     rboot_set_temp_rom(1);
+    esp_ota_set_boot_partition(NAME2SECTOR(BOOT1SECTOR));
     vTaskDelay(20); //allows UDPLOG to flush
     //TODO: this should force a boot from ota_1
     esp_restart();
@@ -873,6 +912,7 @@ void  ota_reboot(void) {
 //         gpio_enable(led, GPIO_INPUT);
 //         gpio_set_pullup(led, 0, 0);
 //     }
+    esp_ota_set_boot_partition(NAME2SECTOR(BOOT0SECTOR));
     vTaskDelay(20); //allows UDPLOG to flush
     //TODO: this should force a boot from ota_0
     esp_restart();
@@ -960,7 +1000,7 @@ void  ota_reboot(void) {
 //     printf("URL=%s\n",url);
 //     char *found_ptr=strstr(url,"releases/tag/");
 //     if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
-//     char *version=malloc(strlen(found_ptr+13));
+//     char *version=malloc(strlen(found_ptr+13)+1);
 //     strcpy(version,found_ptr+13);
 //     printf("version:\"%s\"\n",version);
 // 

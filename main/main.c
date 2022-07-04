@@ -116,9 +116,9 @@ void ota_task(void *arg) {
                 }
             } //now file is here for sure and matches hash
             ota_temp_boot(); //launches the ota software in bootsector 1
-/*    
 #else //NOT OTABOOT    
             UDPLGP("--- running ota-main software\n");
+/*
             //is there a newer version of the bootloader...
             if (new_version) free(new_version);
             new_version=ota_get_version(BTLREPO);
@@ -136,8 +136,9 @@ void ota_task(void *arg) {
                     } //else maybe next time more luck for the bootloader
                 } //no bootloader update 
             }
+*/
             //if there is a newer version of ota-main...
-            if (ota_compare(ota_version,OTAVERSION)>0) { //set OTAVERSION when running make and match with github
+            if (ota_compare(ota_version,esp_ota_get_app_description()->version)>0) { //set OTAVERSION when running make and match with github
                 ota_get_hash(OTAREPO, ota_version, BOOTFILE, &signature);
                 if (ota_verify_signature(&signature)) break; //signature file is not signed by our key, ABORT
                 file_size=ota_get_file(OTAREPO,ota_version,BOOTFILE,BOOT0SECTOR);
@@ -159,7 +160,6 @@ void ota_task(void *arg) {
                 } else break; //user did not supply a proper sig file or fake server -> return to boot0
             } //nothing to update
             break; //leads to boot=0 and starts updated user app
-*/
 #endif //OTABOOT
         }
     }
