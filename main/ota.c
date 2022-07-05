@@ -1,3 +1,4 @@
+/*  (c) 2018-2022 HomeAccessoryKid */
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -11,17 +12,9 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
-// #include "protocol_examples_common.h"
 #include "errno.h"
-
-// #if CONFIG_EXAMPLE_CONNECT_WIFI
-// #include "esp_wifi.h"
-// #endif
-//===============================
-
 #include "ota.h"
 #include "mbedtls/sha512.h" //contains sha384 support
-
 #include "mbedtls/platform.h"
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/esp_debug.h"
@@ -40,21 +33,15 @@ mbedtls_ecdsa_context mbedtls_ecdsa_ctx;
 
 #define BUFFSIZE 1024
 #define NAME2SECTOR(sectorname) esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sectorname])
+char sectorlabel[][10]={"buffer","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
 
 static const char *TAG = "LCM";
-/*an ota data write buffer ready to write to the flash*/
 
-char sectorlabel[][10]={"buffer","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
+static int  verify = 1;
 uint8_t userbeta=0;
 uint8_t otabeta=0;
 // int8_t led=16;
 static byte file_first_byte[]={0xff};
-
-// static void __attribute__((noreturn)) task_fatal_error(void){
-//     ESP_LOGE(TAG, "Exiting task due to fatal error...");
-//     (void)vTaskDelete(NULL);
-//     while (1) {;}
-// }
 
 nvs_handle_t lcm_handle;
 void  ota_nvs_init() {
@@ -134,44 +121,8 @@ void  ota_active_sector() {
     UDPLGP("%s\n",sectorlabel[active_cert_sector]);
 }
 
-static int  verify = 1;
-void  ota_set_verify(int onoff) {
-    UDPLGP("--- ota_set_verify...");
-    
-    if (onoff) {
-        UDPLGP("ON\n");
-        if (verify==0) {
-            verify= 1;
-
-//             ret=wolfSSL_CTX_load_verify_buffer(ctx, certs, ret, SSL_FILETYPE_PEM);
-//             if ( ret != SSL_SUCCESS) {
-//                 UDPLGP("fail cert loading, return %d\n", ret);
-//             }
-//             free(certs);
-//             
-            time_t ts;
-//             do {
-                ts = time(NULL);
-//                 if (ts == ((time_t)-1)) printf("ts=-1, ");
-//                 vTaskDelay(1);
-//             } while (!(ts>1073741823)); //2^30-1 which is supposed to be like 2004
-            UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
-            
-//             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
-        }
-    } else {
-        UDPLGP("OFF\n");
-        if (verify==1) {
-            verify= 0;
-//             wolfSSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, NULL);
-            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
-        }
-    }
-}
-
 void  ota_init() {
-    UDPLGP("--- %s version %s\n",esp_ota_get_app_description()->project_name,esp_ota_get_app_description()->version);
+    UDPLGP("%s %s version %s\n",esp_ota_get_app_description()->project_name,ota_boot()?"OTABOOT":"OTAMAIN",esp_ota_get_app_description()->version);
     UDPLGP("--- ota_init\n");
 
     int size=0;
@@ -189,15 +140,6 @@ void  ota_init() {
 //         if (led<16) xTaskCreate(led_blink_task, "ledblink", 256, NULL, 1, &ledblinkHandle);
 //     }
 
-//     //rboot setup
-//     rboot_config conf;
-//     conf=rboot_get_config();
-//     UDPLGP("rboot_config.unused[1]=LEDinfo from 0x%02x to 0x%02x\n",conf.unused[1],led_info);
-//     if (conf.count!=2 || conf.roms[0]!=BOOT0SECTOR || conf.roms[1]!=BOOT1SECTOR || conf.current_rom!=0 || conf.unused[1]!=led_info) {
-//         conf.count =2;   conf.roms[0] =BOOT0SECTOR;   conf.roms[1] =BOOT1SECTOR;   conf.current_rom =0;   conf.unused[1] =led_info;
-//         rboot_set_config(&conf);
-//     }
-    
 //     //time support
 //     const char *servers[] = {SNTP_SERVERS};
 // 	sntp_set_update_delay(24*60*60000); //SNTP will request an update every 24 hour
@@ -238,34 +180,64 @@ void  ota_init() {
     ota_set_verify(0);
 }
 
-int   ota_load_user_app(char * *repo, char * *version, char * *file) {
-    UDPLGP("--- ota_load_user_app\n");
 
-    size_t size;
-    char* value=NULL;
-    if (nvs_get_str(lcm_handle,"ota_repo", NULL,  &size)==ESP_OK) {
-        value = malloc(size);
-        nvs_get_str(lcm_handle,"ota_repo", value, &size);
-        *repo=value;
-    } else return -1;
-
-    if (nvs_get_str(lcm_handle,"ota_file", NULL,  &size)==ESP_OK) {
-        value = malloc(size);
-        nvs_get_str(lcm_handle,"ota_file", value, &size);
-        *file=value;
-    } else return -1;
-
-    if (nvs_get_str(lcm_handle,"ota_version", NULL,  &size)==ESP_OK) {
-        value = malloc(size);
-        nvs_get_str(lcm_handle,"ota_version", value, &size);
-        *version=value;
-    } else {
-        *version=malloc(6);
-        strcpy(*version,"0.0.0");
+int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, report filesize
+    UDPLGP("--- ota_get_pubkey\n");
+    
+    byte buf[PKEYSIZE];
+    byte * buffer=buf;
+    int length,ret=0;
+    //load public key as produced by openssl
+    if (esp_partition_read(NAME2SECTOR(sector),
+                                                    0,(byte *)buffer, PKEYSIZE)!=ESP_OK) {
+        UDPLGP("error reading flash\n");    return -1;
     }
+    //do not test the first byte since else the key-update routine will not be able to collect a key
+    if (buffer[ 1]!=0x76 || buffer[ 2]!=0x30 || buffer[ 3]!=0x10) return -2; //not a valid keyformat
+    if (buffer[20]!=0x03 || buffer[21]!=0x62 || buffer[22]!=0x00) return -2; //not a valid keyformat
+    length=97;
+    
+    int idx; for (idx=0;idx<length;idx++) printf(" %02x",buffer[idx+23]);
+    printf("\n");
 
-    UDPLGP("user_repo=\'%s\' user_version=\'%s\' user_file=\'%s\'\n",*repo,*version,*file);
-    return 0;
+    //typedef struct mbedtls_ecp_keypair { //this is also mbedtls_ecdsa_context
+    //    mbedtls_ecp_group grp;      /*!<  Elliptic curve and base point     */
+    //    mbedtls_mpi d;              /*!<  our secret value                  */
+    //    mbedtls_ecp_point Q;        /*!<  our public value                  */
+    ret=mbedtls_ecp_point_read_binary(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q,buffer+23,length);
+    printf("keycheck: 0x%02x\n",mbedtls_ecp_check_pubkey(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q));
+    UDPLGP("ret: %d\n",ret);
+
+    if (!ret)return PKEYSIZE; else return ret;
+}
+
+void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
+    UDPLGP("--- ota_hash\n");
+    
+    int bytes;
+    byte buffer[1024];
+    mbedtls_sha512_context sha;
+    
+    mbedtls_sha512_init(&sha);
+    mbedtls_sha512_starts_ret(&sha,1); //SHA384
+    //printf("bytes: ");
+    for (bytes=0;bytes<filesize-1024;bytes+=1024) {
+        //printf("%d ",bytes);
+        if (esp_partition_read(NAME2SECTOR(start_sector),bytes,(byte *)buffer,1024)!=ESP_OK) {
+            UDPLGP("error reading flash\n");   break;
+        }
+        if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
+        mbedtls_sha512_update_ret(&sha, buffer, 1024);
+    }
+    //printf("%d\n",bytes);
+    if (esp_partition_read(NAME2SECTOR(start_sector),bytes,(byte *)buffer,filesize-bytes)!=ESP_OK) {
+        UDPLGP("error reading flash @ %d for %d bytes\n",start_sector+bytes,filesize-bytes);
+    }
+    if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
+    //printf("filesize %d\n",filesize);
+    mbedtls_sha512_update_ret(&sha, buffer, filesize-bytes);
+    mbedtls_sha512_finish_ret(&sha, hash);
+    mbedtls_sha512_free(&sha);
 }
 
 int ota_compare(char* newv, char* oldv) { //(if equal,0) (if newer,1) (if pre-release or older,-1)
@@ -333,8 +305,6 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
         }
         //ESP_LOGI(TAG, "BIOsetup...");
         mbedtls_ssl_set_bio(ssl, socket, mbedtls_net_send, mbedtls_net_recv, NULL);
-//     ret = wolfSSL_UseSNI(*ssl, WOLFSSL_SNI_HOST_NAME, host, strlen(host));
-//     if (verify) ret=wolfSSL_check_domain_name(*ssl, host);
         //ESP_LOGI(TAG, "Performing the SSL/TLS handshake...");
         while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
             if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -353,6 +323,179 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
         //ESP_LOGI(TAG, "Cipher suite is %s", mbedtls_ssl_get_ciphersuite(ssl));
     } //end SSL mode
     return 0;
+}
+
+int   ota_load_user_app(char * *repo, char * *version, char * *file) {
+    UDPLGP("--- ota_load_user_app\n");
+
+    size_t size;
+    char* value=NULL;
+    if (nvs_get_str(lcm_handle,"ota_repo", NULL,  &size)==ESP_OK) {
+        value = malloc(size);
+        nvs_get_str(lcm_handle,"ota_repo", value, &size);
+        *repo=value;
+    } else return -1;
+
+    if (nvs_get_str(lcm_handle,"ota_file", NULL,  &size)==ESP_OK) {
+        value = malloc(size);
+        nvs_get_str(lcm_handle,"ota_file", value, &size);
+        *file=value;
+    } else return -1;
+
+    if (nvs_get_str(lcm_handle,"ota_version", NULL,  &size)==ESP_OK) {
+        value = malloc(size);
+        nvs_get_str(lcm_handle,"ota_version", value, &size);
+        *version=value;
+    } else {
+        *version=malloc(6);
+        strcpy(*version,"0.0.0");
+    }
+
+    UDPLGP("user_repo=\'%s\' user_version=\'%s\' user_file=\'%s\'\n",*repo,*version,*file);
+    return 0;
+}
+
+void  ota_set_verify(int onoff) {
+    UDPLGP("--- ota_set_verify...");
+    
+    if (onoff) {
+        UDPLGP("ON\n");
+        if (verify==0) {
+            verify= 1;
+
+            time_t ts;
+//             do {
+                ts = time(NULL);
+//                 if (ts == ((time_t)-1)) printf("ts=-1, ");
+//                 vTaskDelay(1);
+//             } while (!(ts>1073741823)); //2^30-1 which is supposed to be like 2004
+            UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
+            
+            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
+        }
+    } else {
+        UDPLGP("OFF\n");
+        if (verify==1) {
+            verify= 0;
+            mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_OPTIONAL);
+        }
+    }
+}
+
+char* ota_get_version(char * repo) {
+    UDPLGP("--- ota_get_version\n");
+
+    char* version=NULL;
+    char prerelease[64]; 
+    int retc, ret=0;
+    int httpcode;
+    mbedtls_ssl_context ssl;
+    mbedtls_net_context socket;
+    //host=begin(repo);
+    //mid =end(repo)+blabla+version
+    char* found_ptr;
+    char recv_buf[RECV_BUF_LEN];
+    int  send_bytes; //= sizeof(send_data);
+    
+    strcat(strcat(strcat(strcat(strcat(strcpy(recv_buf, \
+        REQUESTHEAD),repo),"/releases/latest"),REQUESTTAIL),CONFIG_LCM_GITHOST),CRLFCRLF);
+    send_bytes=strlen(recv_buf);
+    //printf("%s\n",recv_buf);
+
+    retc = ota_connect(CONFIG_LCM_GITHOST, HTTPS_PORT, &socket, &ssl);  //release socket and ssl when ready
+    
+    if (!retc) {
+        UDPLGP("%s",recv_buf);
+        ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+        if (ret > 0) {
+            printf("sent OK\n");
+
+            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
+            if (ret > 0) {
+                recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+                found_ptr=ota_strstr(recv_buf,"http/1.1 ");
+                found_ptr+=9; //flush "HTTP/1.1 "
+                httpcode=atoi(found_ptr);
+                UDPLGP("HTTP returns %d for ",httpcode);
+                if (httpcode!=302) {
+                    mbedtls_ssl_session_reset(&ssl);
+                    mbedtls_net_free(&socket);
+                    return "404";
+                }
+            } else {
+                UDPLGP("failed, return [-0x%x]\n", -ret);
+                return "404";
+            }
+
+            while (1) {
+//                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+                found_ptr=ota_strstr(recv_buf,"\nlocation:");
+                if (found_ptr) break;
+//                 mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 12);
+//                 ret = mbedtls_ssl_peek(&ssl, recv_buf, RECV_BUF_LEN - 1); //peek
+                if (ret <= 0) {
+                    UDPLGP("failed, return [-0x%x]\n", -ret);
+//                     ret=wolfSSL_get_error(ssl,ret);
+//                     UDPLGP("wolfSSL_send error = %d\n", ret);
+                    return "404";
+                }
+            }
+//             ret=mbedtls_ssl_read(&ssl, recv_buf, found_ptr-recv_buf + 11); //flush all previous material
+//             ret=mbedtls_ssl_read(&ssl, recv_buf, RECV_BUF_LEN - 1); //this starts for sure with the content of "Location: "
+//             recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
+//             strchr(recv_buf,'\r')[0]=0;
+            strchr(found_ptr,'\r')[0]=0;
+            found_ptr=ota_strstr(recv_buf,"releases/tag/");
+            if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
+            version=malloc(strlen(found_ptr+13)+1);
+            strcpy(version,found_ptr+13);
+            printf("%s@version:\"%s\" according to latest release\n",repo,version);
+        } else {
+            UDPLGP("failed, return [-0x%x]\n", -ret);
+//             ret=wolfSSL_get_error(ssl,ret);
+//             UDPLGP("wolfSSL_send error = %d\n", ret);
+        }
+    }
+    switch (retc) {
+        case  0:
+        case -1:
+        mbedtls_ssl_session_reset(&ssl);
+        case -2:
+        mbedtls_net_free(&socket);
+        case -3:
+        default:
+        ;
+    }
+
+//     if (retc) return retc;
+//     if (ret <= 0) return ret;
+
+//     //TODO: maybe add more error return messages... like version "99999.99.99"
+//     //find latest-pre-release if joined beta program
+//     bool OTAorBTL=!(strcmp(OTAREPO,repo)&&strcmp(BTLREPO,repo));
+//     if ( (userbeta && !OTAorBTL) || (otabeta && OTAorBTL)) {
+//         prerelease[63]=0;
+//         ret=ota_get_file_ex(repo,version,"latest-pre-release",0,(byte *)prerelease,63);
+//         if (ret>0) {
+//             prerelease[ret]=0; //TODO: UNTESTED make a final 0x0a and or 0x0d optional
+//             if (prerelease[ret-1]=='\n') {
+//                 prerelease[ret-1]=0;
+//                 if (prerelease[ret-2]=='\r') prerelease[ret-2]=0;                
+//             }
+//             free(version);
+//             version=malloc(strlen(prerelease)+1);
+//             strcpy(version,prerelease);
+//         }
+//     }
+//     
+//     if (ota_boot() && ota_compare(version,OTAVERSION)<0) { //this acts when setting up a new version
+//         free(version);
+//         version=malloc(strlen(OTAVERSION)+1);
+//         strcpy(version,OTAVERSION);
+//     }
+    
+    UDPLGP("%s@version:\"%s\"\n",repo,version);
+    return version;
 }
 
 int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte * buffer, int bufsz) { //number of bytes
@@ -406,8 +549,6 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                 }
             } else {
                 UDPLGP("failed, return [-0x%x]\n", -ret);
-//                 ret=wolfSSL_get_error(ssl,ret);
-//                 UDPLGP("wolfSSL_send error = %d\n", ret);
                 return -1;
             }
             while (1) {
@@ -418,8 +559,6 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
 //                 ret = mbedtls_ssl_peek(&ssl, recv_buf, RECV_BUF_LEN - 1); //peek
                 if (ret <= 0) {
                     UDPLGP("failed, return [-0x%x]\n", -ret);
-//                     ret=wolfSSL_get_error(ssl,ret);
-//                     UDPLGP("wolfSSL_send error = %d\n", ret);
                     return -1;
                 }
             }
@@ -435,8 +574,6 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             //printf("location=%s\n",found_ptr);
         } else {
             UDPLGP("failed, return [-0x%x]\n", -ret);
-//             ret=wolfSSL_get_error(ssl,ret);
-//             UDPLGP("wolfSSL_send error = %d\n", ret);
         }
     }
     switch (retc) {
@@ -528,16 +665,13 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                             if (writespace<ret) {
                                 UDPLGP("erasing %s@0x%05x>", sectorlabel[sector],collected);
                                 if (esp_partition_erase_range(NAME2SECTOR(sector),collected,SECTORSIZE)) return -6; //erase error
-//                                 if (!spiflash_erase_sector(sector+collected)) return -6; //erase error
                                 writespace+=SECTORSIZE;
                             }
                             if (collected) {
                                 if (esp_partition_write(NAME2SECTOR(sector),collected,(byte *)recv_buf,ret)) return -7; //write error
-//                                 if (!spiflash_write(sector+collected, (byte *)recv_buf,   ret  )) return -7; //write error
                             } else { //at the very beginning, do not write the first byte yet but store it for later
                                 file_first_byte[0]=(byte)recv_buf[0];
                                 if (esp_partition_write(NAME2SECTOR(sector),1,  (byte *)recv_buf+1,  ret-1)) return -7; //write error
-//                                 if (!spiflash_write(sector+1        , (byte *)recv_buf+1, ret-1)) return -7; //write error
                             }
                             writespace-=ret;
                         } else { //buffer
@@ -564,8 +698,6 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         } else {
             printf("failed, return [-0x%x]\n", -ret);
             if (!emergency) {
-//             ret=wolfSSL_get_error(ssl,ret);
-//             printf("wolfSSL_send error = %d\n", ret);
             }
             if (ret==-308) {
                 retc = ota_connect(host2, port, &socket, &ssl); //dangerous for eternal connecting? memory leak?
@@ -618,193 +750,12 @@ void  ota_finalize_file(int sector) {
     } else {
         if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)file_first_byte,1)) UDPLGP("error writing flash\n");
     }
-//     if (!spiflash_write(sector, file_first_byte, 1)) UDPLGP("error writing flash\n");
     //TODO: add verification and retry and if wrong return status...
 }
 
 int   ota_get_file(char * repo, char * version, char * file, int sector) { //number of bytes
    UDPLGP("--- ota_get_file\n");
    return ota_get_file_ex(repo,version,file,sector,NULL,0);
-}
-
-char* ota_get_version(char * repo) {
-    UDPLGP("--- ota_get_version\n");
-
-    char* version=NULL;
-    char prerelease[64]; 
-    int retc, ret=0;
-    int httpcode;
-    mbedtls_ssl_context ssl;
-    mbedtls_net_context socket;
-    //host=begin(repo);
-    //mid =end(repo)+blabla+version
-    char* found_ptr;
-    char recv_buf[RECV_BUF_LEN];
-    int  send_bytes; //= sizeof(send_data);
-    
-    strcat(strcat(strcat(strcat(strcat(strcpy(recv_buf, \
-        REQUESTHEAD),repo),"/releases/latest"),REQUESTTAIL),CONFIG_LCM_GITHOST),CRLFCRLF);
-    send_bytes=strlen(recv_buf);
-    //printf("%s\n",recv_buf);
-
-    retc = ota_connect(CONFIG_LCM_GITHOST, HTTPS_PORT, &socket, &ssl);  //release socket and ssl when ready
-    
-    if (!retc) {
-        UDPLGP("%s",recv_buf);
-        ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
-        if (ret > 0) {
-            printf("sent OK\n");
-
-            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
-            if (ret > 0) {
-                recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
-                found_ptr=ota_strstr(recv_buf,"http/1.1 ");
-                found_ptr+=9; //flush "HTTP/1.1 "
-                httpcode=atoi(found_ptr);
-                UDPLGP("HTTP returns %d for ",httpcode);
-                if (httpcode!=302) {
-                    mbedtls_ssl_session_reset(&ssl);
-                    mbedtls_net_free(&socket);
-                    return "404";
-                }
-            } else {
-                UDPLGP("failed, return [-0x%x]\n", -ret);
-//                 ret=wolfSSL_get_error(ssl,ret);
-//                 UDPLGP("wolfSSL_send error = %d\n", ret);
-                return "404";
-            }
-
-            while (1) {
-//                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
-                found_ptr=ota_strstr(recv_buf,"\nlocation:");
-                if (found_ptr) break;
-//                 mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 12);
-//                 ret = mbedtls_ssl_peek(&ssl, recv_buf, RECV_BUF_LEN - 1); //peek
-                if (ret <= 0) {
-                    UDPLGP("failed, return [-0x%x]\n", -ret);
-//                     ret=wolfSSL_get_error(ssl,ret);
-//                     UDPLGP("wolfSSL_send error = %d\n", ret);
-                    return "404";
-                }
-            }
-//             ret=mbedtls_ssl_read(&ssl, recv_buf, found_ptr-recv_buf + 11); //flush all previous material
-//             ret=mbedtls_ssl_read(&ssl, recv_buf, RECV_BUF_LEN - 1); //this starts for sure with the content of "Location: "
-//             recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
-//             strchr(recv_buf,'\r')[0]=0;
-            strchr(found_ptr,'\r')[0]=0;
-            found_ptr=ota_strstr(recv_buf,"releases/tag/");
-            if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
-            version=malloc(strlen(found_ptr+13)+1);
-            strcpy(version,found_ptr+13);
-            printf("%s@version:\"%s\" according to latest release\n",repo,version);
-        } else {
-            UDPLGP("failed, return [-0x%x]\n", -ret);
-//             ret=wolfSSL_get_error(ssl,ret);
-//             UDPLGP("wolfSSL_send error = %d\n", ret);
-        }
-    }
-    switch (retc) {
-        case  0:
-        case -1:
-        mbedtls_ssl_session_reset(&ssl);
-        case -2:
-        mbedtls_net_free(&socket);
-        case -3:
-        default:
-        ;
-    }
-
-//     if (retc) return retc;
-//     if (ret <= 0) return ret;
-
-//     //TODO: maybe add more error return messages... like version "99999.99.99"
-//     //find latest-pre-release if joined beta program
-//     bool OTAorBTL=!(strcmp(OTAREPO,repo)&&strcmp(BTLREPO,repo));
-//     if ( (userbeta && !OTAorBTL) || (otabeta && OTAorBTL)) {
-//         prerelease[63]=0;
-//         ret=ota_get_file_ex(repo,version,"latest-pre-release",0,(byte *)prerelease,63);
-//         if (ret>0) {
-//             prerelease[ret]=0; //TODO: UNTESTED make a final 0x0a and or 0x0d optional
-//             if (prerelease[ret-1]=='\n') {
-//                 prerelease[ret-1]=0;
-//                 if (prerelease[ret-2]=='\r') prerelease[ret-2]=0;                
-//             }
-//             free(version);
-//             version=malloc(strlen(prerelease)+1);
-//             strcpy(version,prerelease);
-//         }
-//     }
-//     
-//     if (ota_boot() && ota_compare(version,OTAVERSION)<0) { //this acts when setting up a new version
-//         free(version);
-//         version=malloc(strlen(OTAVERSION)+1);
-//         strcpy(version,OTAVERSION);
-//     }
-    
-    UDPLGP("%s@version:\"%s\"\n",repo,version);
-    return version;
-}
-
-
-int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, report filesize
-    UDPLGP("--- ota_get_pubkey\n");
-    
-    byte buf[PKEYSIZE];
-    byte * buffer=buf;
-    int length,ret=0;
-    //load public key as produced by openssl
-    if (esp_partition_read(NAME2SECTOR(sector),
-                                                    0,(byte *)buffer, PKEYSIZE)!=ESP_OK) {
-        UDPLGP("error reading flash\n");    return -1;
-    }
-    //do not test the first byte since else the key-update routine will not be able to collect a key
-    if (buffer[ 1]!=0x76 || buffer[ 2]!=0x30 || buffer[ 3]!=0x10) return -2; //not a valid keyformat
-    if (buffer[20]!=0x03 || buffer[21]!=0x62 || buffer[22]!=0x00) return -2; //not a valid keyformat
-    length=97;
-    
-    int idx; for (idx=0;idx<length;idx++) printf(" %02x",buffer[idx+23]);
-    printf("\n");
-
-    //typedef struct mbedtls_ecp_keypair { //this is also mbedtls_ecdsa_context
-    //    mbedtls_ecp_group grp;      /*!<  Elliptic curve and base point     */
-    //    mbedtls_mpi d;              /*!<  our secret value                  */
-    //    mbedtls_ecp_point Q;        /*!<  our public value                  */
-    ret=mbedtls_ecp_point_read_binary(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q,buffer+23,length);
-    printf("keycheck: 0x%02x\n",mbedtls_ecp_check_pubkey(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q));
-//     wc_ecc_init(&pubecckey);
-//     ret=wc_ecc_import_x963_ex(buffer+23,length,&pubecckey,ECC_SECP384R1);
-    UDPLGP("ret: %d\n",ret);
-
-    if (!ret)return PKEYSIZE; else return ret;
-}
-
-void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
-    UDPLGP("--- ota_hash\n");
-    
-    int bytes;
-    byte buffer[1024];
-    mbedtls_sha512_context sha;
-    
-    mbedtls_sha512_init(&sha);
-    mbedtls_sha512_starts_ret(&sha,1); //SHA384
-    //printf("bytes: ");
-    for (bytes=0;bytes<filesize-1024;bytes+=1024) {
-        //printf("%d ",bytes);
-        if (esp_partition_read(NAME2SECTOR(start_sector),bytes,(byte *)buffer,1024)!=ESP_OK) {
-            UDPLGP("error reading flash\n");   break;
-        }
-        if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
-        mbedtls_sha512_update_ret(&sha, buffer, 1024);
-    }
-    //printf("%d\n",bytes);
-    if (esp_partition_read(NAME2SECTOR(start_sector),bytes,(byte *)buffer,filesize-bytes)!=ESP_OK) {
-        UDPLGP("error reading flash @ %d for %d bytes\n",start_sector+bytes,filesize-bytes);
-    }
-    if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
-    //printf("filesize %d\n",filesize);
-    mbedtls_sha512_update_ret(&sha, buffer, filesize-bytes);
-    mbedtls_sha512_finish_ret(&sha, hash);
-    mbedtls_sha512_free(&sha);
 }
 
 int   ota_get_hash(char * repo, char * version, char * file, signature_t* signature) {
@@ -845,12 +796,9 @@ int   ota_verify_signature(signature_t* signature) {
     
     int answer=0;
     answer=mbedtls_ecdsa_read_signature(&mbedtls_ecdsa_ctx,signature->hash,HASHSIZE,signature->sign,signature->sign[1]+2);
-//     wc_ecc_verify_hash(signature->sign, SIGNSIZE, signature->hash, HASHSIZE, &answer, &pubecckey);
     UDPLGP("signature valid:%s code:0x%02x\n",answer?"no":"yes",answer);
-//     UDPLGP("signature valid:%s code:0x%02x\n",answer-1?"no":"yes",answer);
 
     return answer;
-//     return answer-1;
 }
 
 void  ota_kill_file(int sector) {
@@ -858,7 +806,6 @@ void  ota_kill_file(int sector) {
 
     byte zero[]={0x00};
     if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)zero,1)) UDPLGP("error writing flash\n");
-//     if (!spiflash_write(sector, zero, 1)) UDPLGP("error writing flash\n");
 }
 
 void  ota_swap_cert_sector() {
@@ -886,21 +833,19 @@ void  ota_write_status(char * version) {
 int   ota_boot(void) {
     UDPLGP("--- ota_boot...");
     byte bootrom;
-//     rboot_get_last_boot_rom(&bootrom);
     const esp_partition_t *running = esp_ota_get_running_partition();
     if (running->subtype==ESP_PARTITION_SUBTYPE_APP_OTA_0) bootrom=0; else bootrom=1;
     
-    UDPLGP("%d\n",bootrom);
+    UDPLGP("ROM=%d\n",bootrom);
     return 1-bootrom;
 }
 
 void  ota_temp_boot(void) {
     UDPLGP("--- ota_temp_boot\n");
     
-//     rboot_set_temp_rom(1);
+    //TODO make this truly temporary and not through writing to otadata flash sector
     esp_ota_set_boot_partition(NAME2SECTOR(BOOT1SECTOR));
     vTaskDelay(20); //allows UDPLOG to flush
-    //TODO: this should force a boot from ota_1
     esp_restart();
 }
 
@@ -914,7 +859,6 @@ void  ota_reboot(void) {
 //     }
     esp_ota_set_boot_partition(NAME2SECTOR(BOOT0SECTOR));
     vTaskDelay(20); //allows UDPLOG to flush
-    //TODO: this should force a boot from ota_0
     esp_restart();
 }
 
@@ -922,35 +866,7 @@ void  ota_reboot(void) {
 
 
 //===================================================
-
-// #define OTA_URL_SIZE 256
-// static char ota_write_data[BUFFSIZE + 1] = { 0 };
-// 
-// static void http_cleanup(esp_http_client_handle_t client)
-// {
-//     esp_http_client_close(client);
-//     esp_http_client_cleanup(client);
-// }
-// 
-// static void infinite_loop(void)
-// {
-//     int i = 0;
-//     ESP_LOGI(TAG, "When a new firmware is available on the server, press the reset button to download it");
-//     while(1) {
-//         ESP_LOGI(TAG, "Waiting for a new firmware ... %d", ++i);
-//         vTaskDelay(2000 / portTICK_PERIOD_MS);
-//     }
-// }
-// 
-// void ota_example_task(void *pvParameter)
-// {
-//     esp_err_t err;
-//     /* update handle : set by esp_ota_begin(), must be freed via esp_ota_end() */
-//     esp_ota_handle_t update_handle = 0 ;
-//     const esp_partition_t *update_partition = NULL;
-// 
-//     ESP_LOGI(TAG, "Starting OTA example");
-// 
+// snippets of potentially useful code below
 //     const esp_partition_t *configured = esp_ota_get_boot_partition();
 //     const esp_partition_t *running = esp_ota_get_running_partition();
 // 
@@ -962,91 +878,11 @@ void  ota_reboot(void) {
 //     ESP_LOGI(TAG, "Running partition type %d subtype %d (offset 0x%08x)",
 //              running->type, running->subtype, running->address);
 // 
-//     esp_http_client_config_t config = {
-//         .url = "https://github.com/HomeACcessoryKid/LCM4ESP32/releases/latest",
-// //         .cert_pem = (char *)server_cert_pem_start,
-//         .timeout_ms = CONFIG_EXAMPLE_OTA_RECV_TIMEOUT,
-//         .keep_alive_enable = true,
-//         .buffer_size    = 1024,
-//         .buffer_size_tx = 1024,
-//     };
-// 
-//     esp_http_client_handle_t client = esp_http_client_init(&config);
-//     if (client == NULL) {
-//         ESP_LOGE(TAG, "Failed to initialise HTTP connection");
-//         task_fatal_error();
-//     }
-//     err = esp_http_client_open(client, 0);
-//     if (err != ESP_OK) {
-//         ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-//         esp_http_client_cleanup(client);
-//         task_fatal_error();
-//     }
-//     esp_http_client_fetch_headers(client);
-//     int code=esp_http_client_get_status_code(client);
-//     printf("code=%d\n",code);
-// //     this doesn't work because it doesn't actually flush the internal buffer
-// //     int flushlen;
-// //     printf("result %d of ",esp_http_client_flush_response(client,&flushlen));
-// //     printf("flushed %d\n",flushlen);
-//     ota_write_data[esp_http_client_read(client, ota_write_data, BUFFSIZE)]=0;
-//     printf("flushed: %s\n",ota_write_data);
-//     
-// //     this doesn't work because client struct set up as private...
-// //     printf("loca=%s\n",&client->location);
-//     esp_http_client_set_redirection(client);
-//     char url[500];
-//     esp_http_client_get_url(client, url, 500);
-//     printf("URL=%s\n",url);
-//     char *found_ptr=strstr(url,"releases/tag/");
-//     if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
-//     char *version=malloc(strlen(found_ptr+13)+1);
-//     strcpy(version,found_ptr+13);
-//     printf("version:\"%s\"\n",version);
-// 
-//     esp_http_client_set_url(client,"https://github.com/HomeACcessoryKid/LCM4ESP32/releases/download/0.0.2/LCM4ESP32.bin");
-// 
-//     err = esp_http_client_open(client, 0);
-//     if (err != ESP_OK) {
-//         ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-//         esp_http_client_cleanup(client);
-//         task_fatal_error();
-//     }
-//     esp_http_client_fetch_headers(client);
-// 
-//     code=esp_http_client_get_status_code(client);
-//     printf("code=%d\n",code);
-//     
-//     if (code==302) {
-//         ota_write_data[esp_http_client_read(client, ota_write_data, BUFFSIZE)]=0;
-//         printf("flushed: %s\n",ota_write_data);        
-//         esp_http_client_set_redirection(client); // this fails because it still has the original location pre-pended to URL
-//     }
-// 
-//     err = esp_http_client_open(client, 0);
-//     if (err != ESP_OK) {
-//         ESP_LOGE(TAG, "Failed to perform HTTP connection: %s", esp_err_to_name(err));
-//         esp_http_client_cleanup(client);
-//         task_fatal_error();
-//     }
-//     esp_http_client_fetch_headers(client);    
-//     
-// 
 //     update_partition = esp_ota_get_next_update_partition(NULL);
 //     assert(update_partition != NULL);
 //     ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x",
 //              update_partition->subtype, update_partition->address);
-// 
-//     int binary_file_length = 0;
-//     /*deal with all receive packet*/
 //     bool image_header_was_checked = false;
-//     while (1) {
-//         int data_read = esp_http_client_read(client, ota_write_data, BUFFSIZE);
-//         if (data_read < 0) {
-//             ESP_LOGE(TAG, "Error: SSL data read error");
-//             http_cleanup(client);
-//             task_fatal_error();
-//         } else if (data_read > 0) {
 //             if (image_header_was_checked == false) {
 //                 esp_app_desc_t new_app_info;
 //                 if (data_read > sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
@@ -1071,65 +907,22 @@ void  ota_reboot(void) {
 //                             ESP_LOGW(TAG, "New version is the same as invalid version.");
 //                             ESP_LOGW(TAG, "Previously, there was an attempt to launch the firmware with %s version, but it failed.", invalid_app_info.version);
 //                             ESP_LOGW(TAG, "The firmware has been rolled back to the previous version.");
-//                             http_cleanup(client);
-//                             infinite_loop();
 //                         }
 //                     }
-// #ifndef CONFIG_EXAMPLE_SKIP_VERSION_CHECK
 //                     if (memcmp(new_app_info.version, running_app_info.version, sizeof(new_app_info.version)) == 0) {
 //                         ESP_LOGW(TAG, "Current running version is the same as a new. We will not continue the update.");
-//                         http_cleanup(client);
-//                         infinite_loop();
 //                     }
-// #endif
 // 
 //                     image_header_was_checked = true;
 // 
 //                     err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
 //                     if (err != ESP_OK) {
 //                         ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
-//                         http_cleanup(client);
 //                         esp_ota_abort(update_handle);
-//                         task_fatal_error();
 //                     }
 //                     ESP_LOGI(TAG, "esp_ota_begin succeeded");
-//                 } else {
-//                     ESP_LOGE(TAG, "received package is not fit len");
-//                     http_cleanup(client);
-//                     esp_ota_abort(update_handle);
-//                     task_fatal_error();
 //                 }
 //             }
-//             err = esp_ota_write( update_handle, (const void *)ota_write_data, data_read);
-//             if (err != ESP_OK) {
-//                 http_cleanup(client);
-//                 esp_ota_abort(update_handle);
-//                 task_fatal_error();
-//             }
-//             binary_file_length += data_read;
-//             ESP_LOGD(TAG, "Written image length %d", binary_file_length);
-//         } else if (data_read == 0) {
-//            /*
-//             * As esp_http_client_read never returns negative error code, we rely on
-//             * `errno` to check for underlying transport connectivity closure if any
-//             */
-//             if (errno == ECONNRESET || errno == ENOTCONN) {
-//                 ESP_LOGE(TAG, "Connection closed, errno = %d", errno);
-//                 break;
-//             }
-//             if (esp_http_client_is_complete_data_received(client) == true) {
-//                 ESP_LOGI(TAG, "Connection closed");
-//                 break;
-//             }
-//         }
-//     }
-//     ESP_LOGI(TAG, "Total Write binary data length: %d", binary_file_length);
-//     if (esp_http_client_is_complete_data_received(client) != true) {
-//         ESP_LOGE(TAG, "Error in receiving complete file");
-//         http_cleanup(client);
-//         esp_ota_abort(update_handle);
-//         task_fatal_error();
-//     }
 // 
 //     err = esp_ota_end(update_handle);
 //     if (err != ESP_OK) {
@@ -1138,18 +931,4 @@ void  ota_reboot(void) {
 //         } else {
 //             ESP_LOGE(TAG, "esp_ota_end failed (%s)!", esp_err_to_name(err));
 //         }
-//         http_cleanup(client);
-//         task_fatal_error();
-//     }
-// 
-//     err = esp_ota_set_boot_partition(update_partition);
-//     if (err != ESP_OK) {
-//         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
-//         http_cleanup(client);
-//         task_fatal_error();
-//     }
-//     ESP_LOGI(TAG, "Prepare to restart system in 30 seconds!");
-//     vTaskDelay(3000);
-//     esp_restart();
-//     return ;
-// }
+
