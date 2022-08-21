@@ -1,6 +1,5 @@
 idf_component_register(SRCS "bootloader_start.c"
-                    REQUIRES bootloader bootloader_support
-                    PRIV_REQUIRES spi_flash)
+                    REQUIRES bootloader bootloader_support lcm_bootloader_support)
 
 idf_build_get_property(target IDF_TARGET)
 # Use the linker script files from the actual bootloader

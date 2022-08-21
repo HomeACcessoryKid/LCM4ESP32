@@ -36,6 +36,17 @@ int bootloader_utility_get_selected_boot_partition(const bootloader_state_t *bs)
 /**
  * @brief Load the selected partition and start application.
  *
+ * Do the LifeCycleManager things  (expand)
+ * Everything this function calls must be located in the iram_loader_seg segment.
+ *
+ * @param[in] bs Bootloader state structure.
+ * @param[in] start_index The index from which the search for images begins.
+ */
+__attribute__((noreturn)) void lcm_bootloader_utility_load_boot_image(const bootloader_state_t *bs, int start_index);
+
+/**
+ * @brief Load the selected partition and start application.
+ *
  * Start from partition 'start_index', if not bootable then work backwards to FACTORY_INDEX
  * (ie try any OTA slots in descending order and then the factory partition).
  * If still nothing, start from 'start_index + 1' and work up to highest numbered OTA partition.
