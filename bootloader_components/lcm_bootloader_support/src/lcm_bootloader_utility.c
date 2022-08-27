@@ -578,6 +578,105 @@ void lcm_bootloader_utility_load_boot_image(const bootloader_state_t *bs, int st
     bootloader_reset();
 }
 
+
+// uncomment to add a boot delay, allows you time to connect
+// a terminal before rBoot starts to run and output messages
+// value is in microseconds
+#define BOOT_DELAY_MICROS 50000
+// to define the time within a new powercycle/reboot will be counted
+#define BOOT_CYCLE_DELAY_MICROS 1000000 //1 second? NO, actually this is ??? seconds but that is OK...
+// indicates where the powercycle tracker bits are stored,
+// first half for continue-bits, last half for start-bits
+// other space between rboot-config and this address can be used for other purposes
+#define BOOT_BITS_ADDR 0x40 // target value 0x40 and is relative to start of INactive ota_data sector
+#define FIELD_SIZE (SPI_SEC_SIZE-BOOT_BITS_ADDR)/2
+
+uint32_t lcm_bootloader_count(const bootloader_state_t *bs) {
+//     ESP_LOGI("BL4LCM32","ota_info: 0x%x  0x%x",bs->ota_info.offset,bs->ota_info.size);
+    uint32_t buff0=0,buff1=0;
+    bootloader_flash_read(bs->ota_info.offset, &buff0, 4, 0);
+    bootloader_flash_read(bs->ota_info.offset+SPI_SEC_SIZE, &buff1, 4, 0);
+//     ESP_LOGI("BL4LCM32","0=0x%x  1=0x%x",buff0,buff1);
+//     int32_t buff[8];
+//     bootloader_flash_read(bs->ota_info.offset, &buff, 32, 0);
+//     for (int i=0; i<8; i++) ESP_LOGI("BL4LCM32","%d=0x%x",i,buff[i]);
+    if (buff1==UINT32_MAX) buff1=0; //for uninitialized ota_data[1]
+    uint32_t offset=(buff1>buff0)?bs->ota_info.offset:bs->ota_info.offset+SPI_SEC_SIZE; //select the INactive part
+    //TODO: choose a better algorithm because this on is not perfect
+    esp_rom_printf("BL4LCM32: 0=0x%x  1=0x%x  offset=0x%x\n",buff0,buff1,offset);
+
+/* --------------------------------------------
+Assumptions for the storage of start- and continue-bits
+they will be stored in at the end of BOOT_CONFIG_SECTOR after with the rboot parameters and user parameters
+the define BOOT_BITS_ADDR indicates where the bits are stored, first half for continue-bits, last half for start-bits
+they should be multiples of 8bytes which will assure that the start of the start_bits is at a 32bit address
+the last byte will contain the amount of open continue-bits and is a signal for reflash of this sector
+  --------------------------------------------- */
+    uint32_t last_addr=offset+SPI_SEC_SIZE;
+    uint32_t start_bits, continue_bits, help_bits, count;
+
+    //read last byte of BOOT_CONFIG_SECTOR to see if we need to reflash it if we ran out of status bits
+    //Important to do it ASAP since it reduces the chance of being interupted by a power cycle
+    uint32_t loadAddr=offset+BOOT_BITS_ADDR+FIELD_SIZE;
+    bootloader_flash_read(last_addr-4, &count, 4,0);
+    if (count<33) { //default value is 0xffffffff
+    	uint32_t buffer[BOOT_BITS_ADDR/4];
+        bootloader_flash_read(offset, buffer, BOOT_BITS_ADDR,0);
+        bootloader_flash_erase_range(offset,SPI_SEC_SIZE);
+        bootloader_flash_write(offset, buffer, BOOT_BITS_ADDR,0);
+        start_bits=(uint32_t)~0>>count; //clear start-bits based on value of count
+        bootloader_flash_write(loadAddr,&start_bits,4,0);
+    }
+
+#if defined BOOT_DELAY_MICROS && BOOT_DELAY_MICROS > 0
+	// delay to slow boot (help see messages when debugging)
+	esp_rom_delay_us(BOOT_DELAY_MICROS);
+#endif
+
+    if (count<33)  esp_rom_printf("BL4LCM32: reformatted start_bits field: %08x count: %d\n",start_bits,count);
+    //find the beginning of start-bit-range
+    do {bootloader_flash_read(loadAddr,&start_bits,4,0);
+        if (start_bits) esp_rom_printf("BL4LCM32:          %08x @ %04x\n",start_bits,loadAddr);
+        loadAddr+=4;
+    } while (!start_bits && loadAddr<last_addr); //until a non-zero value
+    loadAddr-=4; //return to the address where start_bits was read
+    
+    bootloader_flash_read(loadAddr-FIELD_SIZE,&continue_bits,4,0);
+    if (continue_bits!=~0 || loadAddr-FIELD_SIZE<=offset+BOOT_BITS_ADDR) esp_rom_printf("BL4LCM32:          %08x @ %04x",continue_bits,loadAddr-FIELD_SIZE);
+    count=1;
+    help_bits=~start_bits&continue_bits; //collect the bits that are not in start_bits
+    while (help_bits) {help_bits&=(help_bits-1);count++;} //count the bits using Brian Kernighan’s Algorithm
+    if (continue_bits==~0 && loadAddr-FIELD_SIZE>offset+BOOT_BITS_ADDR) {
+        bootloader_flash_read(loadAddr-FIELD_SIZE-4,&help_bits,4,0); //read the previous word
+         esp_rom_printf("BL4LCM32: %08x ffffffff @ %04x",help_bits,loadAddr-FIELD_SIZE-4);
+        while (help_bits) {help_bits&=(help_bits-1);count++;} //count more bits
+    }
+     esp_rom_printf(" => count: %d\n",count);
+    
+    //clear_start_bit();
+    if (loadAddr<last_addr-4) {
+        start_bits>>=1; //clear leftmost 1-bit
+        bootloader_flash_write(loadAddr,&start_bits,4,0);
+    } else { //reflash this sector because we reached the end (encode count in last byte and do in next cycle)
+        bootloader_flash_write(last_addr-4,&count,4,0);
+    }
+    
+    if (count<16) esp_rom_delay_us(BOOT_CYCLE_DELAY_MICROS);
+//==================================================//if we powercycle, this is where it stops!
+
+    help_bits=0; //clear_all_continue_bits
+    if (loadAddr<last_addr-4) {
+        if (continue_bits==~0 && loadAddr-FIELD_SIZE>offset+BOOT_BITS_ADDR) bootloader_flash_write(loadAddr-FIELD_SIZE-4,&help_bits,4,0);
+        bootloader_flash_write(loadAddr-FIELD_SIZE,&start_bits,4,0);
+    } else { //reflash this sector because we reached the end (encode ZERO in last byte and do in next cycle)
+        bootloader_flash_write(last_addr-4,&help_bits,4,0);
+    }
+//  --------------------------------------------
+//  End of rboot4lcm key code. count is used further down for choosing rom and stored in rtc for ota-main to interpret
+//  ---------------------------------------------
+    return count;
+}
+
 // Copy loaded segments to RAM, set up caches for mapped segments, and start application.
 static void load_image(const esp_image_metadata_t *image_data)
 {

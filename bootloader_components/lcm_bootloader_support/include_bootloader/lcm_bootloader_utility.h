@@ -45,6 +45,19 @@ int bootloader_utility_get_selected_boot_partition(const bootloader_state_t *bs)
 __attribute__((noreturn)) void lcm_bootloader_utility_load_boot_image(const bootloader_state_t *bs, int start_index);
 
 /**
+ * @brief count the interrupted resets
+ *
+ * write to flash early_counter
+ * wait (while power reset might happen again)
+ * count interupted resets
+ * write to flash late_counter
+ *
+ * @param[in] bs Bootloader state structure.
+ * @return    Returns the count 
+ */
+uint32_t lcm_bootloader_count(const bootloader_state_t *bs);
+
+/**
  * @brief Load the selected partition and start application.
  *
  * Start from partition 'start_index', if not bootable then work backwards to FACTORY_INDEX
