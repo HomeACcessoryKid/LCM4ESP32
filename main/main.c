@@ -180,6 +180,14 @@ void on_wifi_ready() {
 }
 
 
+void pre_wifi_config(void *pvParameters) {
+    UDPLGP("--- pre_wifi_config\n");
+    ota_read_rtc(); //read RTC outcome from rboot4lcm and act accordingly
+    wifi_config_init("LCM", NULL, on_wifi_ready); //expanded it with setting repo-details
+    vTaskDelete(NULL);
+}
+
+
 void app_main(void)
 {
     uint8_t sha_256[HASH_LEN] = { 0 };
@@ -217,5 +225,5 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    wifi_config_init("LCM", NULL, on_wifi_ready);
+    xTaskCreate(pre_wifi_config, "pre_wifi", 4096, NULL, 1, NULL);
 }

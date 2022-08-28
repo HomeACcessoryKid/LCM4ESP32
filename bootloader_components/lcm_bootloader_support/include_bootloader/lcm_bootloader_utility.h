@@ -53,9 +53,22 @@ __attribute__((noreturn)) void lcm_bootloader_utility_load_boot_image(const boot
  * write to flash late_counter
  *
  * @param[in] bs Bootloader state structure.
- * @return    Returns the count 
+ * @return       Returns the count 
  */
 uint32_t lcm_bootloader_count(const bootloader_state_t *bs);
+
+/**
+ * @brief store count in the RTC memory and collect temp_boot from it
+ *
+ * the uint8_t custom[0] is used to store count
+ * the uint8_t custom[1] is used to store temp_boot
+ * custom[1] is cleared after reading
+ * CRC value is updated
+ *
+ * @param[in] count Number of resets
+ * @return          Returns if temp_boot requested 
+ */
+bool lcm_bootloader_rtc(uint32_t count);
 
 /**
  * @brief Load the selected partition and start application.

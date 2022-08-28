@@ -578,6 +578,16 @@ void lcm_bootloader_utility_load_boot_image(const bootloader_state_t *bs, int st
     bootloader_reset();
 }
 
+bool lcm_bootloader_rtc(uint32_t count) {
+    bootloader_common_update_rtc_retain_mem(NULL, true); //prepare RTC memory and increment reboot_counter
+    rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
+    if (count>255) count=255;
+    rtcmem->custom[0]=(uint8_t)count;            //byte zero for count,
+    bool temp_boot=rtcmem->custom[1]?true:false; //byte one  for temp_boot signal (from app to bootloader)
+    rtcmem->custom[1]=0; //reset the temp_boot flag for the next boot
+    bootloader_common_update_rtc_retain_mem(NULL,false); //this will update the CRC only
+    return temp_boot;
+}
 
 // uncomment to add a boot delay, allows you time to connect
 // a terminal before rBoot starts to run and output messages

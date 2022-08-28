@@ -43,14 +43,16 @@ void __attribute__((noreturn)) call_start_cpu0(void) {
     // 2. Count the hardware starts
     // it uses bootloader_state to get the address of the inactive half of the ota_data from partition table
     uint32_t count=lcm_bootloader_count(&bs);    
-    ESP_LOGI("BL4LCM32","count=%d",count);
-    // TODO: store count in RTC for LCM to act on it
     
-    // 3. based on count, set boot_index to 0 or 1
-    #define COUNT4USER 4 //powercycle count that will not yet trigger ota-main
-    boot_index=(count<=COUNT4USER)?0:1;
+    // 3. store count in RTC for LCM to act on it and collect the temp_boot flag
+    bool temp_boot=lcm_bootloader_rtc(count);
+    ESP_LOGI("BL4LCM32","count=%d temp_boot=%d",count,temp_boot);
+    
+    // 4. based on count and temp_boot, set boot_index to 0 or 1
+    #define COUNT4USER 4 //powercycle count that will not yet trigger LCM
+    boot_index=(temp_boot)?1:(count>COUNT4USER)?1:0;
 
-    // 4. Load the app image for booting
+    // 5. Load the app image for booting
     bootloader_utility_load_boot_image(&bs, boot_index);
 }
 

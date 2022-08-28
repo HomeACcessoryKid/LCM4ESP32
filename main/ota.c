@@ -24,6 +24,7 @@
 #include "mbedtls/error.h"
 #include "mbedtls/certs.h"
 #include "mbedtls/ecdsa.h"
+#include "bootloader_common.h"
 
 mbedtls_ssl_config mbedtls_conf;
 mbedtls_entropy_context entropy;
@@ -76,6 +77,125 @@ char *ota_strstr(const char *full_string, const char *search) { //lowercase vers
     const int offset = (int) found - (int) lc_string;
     
     return (char *) ((int) full_string + offset);
+}
+
+static uint8_t count=0,rtc_read_busy=1;
+void ota_rtc_read_task(void *arg) {
+    if (bootloader_common_get_rtc_retain_mem_reboot_counter()) { //if zero, RTC CRC not valid
+        rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
+        count=rtcmem->custom[0]; //byte zero for count
+    } else {
+        count=0;
+    }
+    bootloader_common_reset_rtc_retain_mem(); //this will clear RTC
+    rtc_read_busy=0;
+    vTaskDelete(NULL);
+}
+
+void  ota_read_rtc() {
+    UDPLGP("--- ota_read_rtc\n");
+    rtc_read_busy=1;
+    xTaskCreatePinnedToCore(ota_rtc_read_task,"rtcr",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
+    while (rtc_read_busy) vTaskDelay(1);
+	int sector,user_count=0;
+	int count_step=3;
+//     sysparam_status_t status;
+    char *value=NULL;
+    bool reset_wifi=0;
+    bool reset_otabeta=0;
+    bool factory_reset=0;
+
+//     status = sysparam_init(SYSPARAMSECTOR, 0);
+//     if (status == SYSPARAM_OK) {
+//         status = sysparam_get_string("ota_count_step", &value);
+//         if (status == SYSPARAM_OK) {
+//             if (*value<0x34 && *value>0x30 && strlen(value)==1) count_step=*value-0x30;
+//             free(value);
+//         }
+//         status = sysparam_get_string("ota_count", &value);
+//         if (status == SYSPARAM_OK) {
+//             user_count=atoi(value);
+//             sysparam_set_string("ota_count","");
+//             free(value);
+//         }
+//     }
+    UDPLGP("--- count_step=%d\n",count_step);
+    
+	if (count<2) count=user_count;
+    
+    UDPLGP("--- count=%d\n",count);
+    if      (count<5+count_step*1) { //standard ota-main or ota-boot behavior
+            value="--- standard ota";
+    }
+    else if (count<5+count_step*2) { //reset wifi parameters and clear LCM_beta
+            value="--- reset wifi and clear LCM_beta";
+            reset_wifi=1;
+            reset_otabeta=1;
+    }
+    else if (count<5+count_step*3) { //reset wifi parameters and set LCM_beta
+            value="--- reset wifi and set LCM_beta";
+            reset_wifi=1;
+            otabeta=1;
+    }
+    else    {//factory reset
+            value="--- factory reset";
+            factory_reset=1;
+    }
+    UDPLGP("%s\n",value);
+    if (count>4) {
+        UDPLGP("IF this is NOT what you wanted, reset/power-down NOW!\n");
+        for (int i=9;i>-1;i--) {
+            vTaskDelay(1000/portTICK_PERIOD_MS);
+            UDPLGP("%s in %d s\n",value,i);
+        }
+    }
+    if (factory_reset) {
+//         spiflash_erase_sector(SYSPARAMSECTOR);    spiflash_erase_sector(SYSPARAMSECTOR+SECTORSIZE);//sysparam reset
+//         for (sector=0xfb000; sector<   0x100000; sector+=SECTORSIZE) spiflash_erase_sector(sector);//Espressif area
+//         #ifndef OTABOOT    
+//          for(sector= 0x2000; sector<BOOT1SECTOR; sector+=SECTORSIZE) spiflash_erase_sector(sector);//user space
+//         #endif
+    //nvs_flash_erase();
+    }
+
+//     uint32_t base_addr;
+//     uint32_t num_sectors;  
+// 
+//     status = sysparam_init(SYSPARAMSECTOR, 0);
+//     if (status != SYSPARAM_OK) {
+//         status = sysparam_create_area(SYSPARAMSECTOR, 2, true);
+//         if (status == SYSPARAM_OK) {
+//             status = sysparam_init(SYSPARAMSECTOR, 0);
+//         }
+//     } else {
+//         sysparam_get_info(&base_addr, &num_sectors);
+//         if (num_sectors!=2) {
+//             status = sysparam_create_area(SYSPARAMSECTOR, 2, true);
+//             if (status == SYSPARAM_OK) {
+//                 status = sysparam_init(SYSPARAMSECTOR, 0);
+//             }
+//         }
+//     }
+//     if (status != SYSPARAM_OK) {
+//         printf("WARNING: LCM/OTA could not initialize sysparams (%d)!\n", status);
+//     }
+    if (reset_wifi) {
+//         sysparam_set_string("wifi_ssid","");
+//         sysparam_set_string("wifi_password","");
+//         sysparam_compact(); //to make a copy without the ssid/password (does not erase old region)
+//         sysparam_compact(); //to make sure the information really gets wiped
+//         struct sdk_station_config sta_config; //remove esp wifi client settings
+//         memset(&sta_config, 0, sizeof(sta_config));
+//         sdk_wifi_station_set_config(&sta_config); //This wipes out the info in sectors 0xfd000+
+    }
+    #ifdef OTABETA
+    otabeta=1; //using beta = pre-releases?
+    #endif
+//     if (otabeta && !reset_otabeta) sysparam_set_bool("lcm_beta", 1);
+//     if (            reset_otabeta) sysparam_set_data("lcm_beta", NULL,0,0);
+    if (otabeta && !reset_otabeta) nvs_set_u8(lcm_handle,"lcm_beta", 1);
+    if (            reset_otabeta) nvs_erase_key(lcm_handle,"ota_beta");
+    nvs_commit( lcm_handle);
 }
 
 void  ota_active_sector() {
@@ -840,11 +960,21 @@ int   ota_boot(void) {
     return 1-bootrom;
 }
 
+static uint8_t rtc_write_busy=1;
+void ota_rtc_write_task(void *arg) {
+    rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
+    bootloader_common_reset_rtc_retain_mem(); //this will clear RTC    
+    rtcmem->custom[1]=1; //byte one for temp_boot signal (from app to bootloader)
+    bootloader_common_update_rtc_retain_mem(NULL,false); //this will update the CRC only
+    rtc_write_busy=0;
+    vTaskDelete(NULL);
+}
+
 void  ota_temp_boot(void) {
     UDPLGP("--- ota_temp_boot\n");
-    
-    //TODO make this truly temporary and not through writing to otadata flash sector
-    esp_ota_set_boot_partition(NAME2SECTOR(BOOT1SECTOR));
+    rtc_write_busy=1;
+    xTaskCreatePinnedToCore(ota_rtc_write_task,"rtcw",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
+    while (rtc_write_busy) vTaskDelay(1);
     vTaskDelay(20); //allows UDPLOG to flush
     esp_restart();
 }
@@ -857,7 +987,6 @@ void  ota_reboot(void) {
 //         gpio_enable(led, GPIO_INPUT);
 //         gpio_set_pullup(led, 0, 0);
 //     }
-    esp_ota_set_boot_partition(NAME2SECTOR(BOOT0SECTOR));
     vTaskDelay(20); //allows UDPLOG to flush
     esp_restart();
 }
