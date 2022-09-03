@@ -25,6 +25,7 @@
 #include "mbedtls/certs.h"
 #include "mbedtls/ecdsa.h"
 #include "bootloader_common.h"
+#include "esp_wifi.h"
 
 mbedtls_ssl_config mbedtls_conf;
 mbedtls_entropy_context entropy;
@@ -97,30 +98,21 @@ void  ota_read_rtc() {
     rtc_read_busy=1;
     xTaskCreatePinnedToCore(ota_rtc_read_task,"rtcr",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
     while (rtc_read_busy) vTaskDelay(1);
-	int sector,user_count=0;
-	int count_step=3;
-//     sysparam_status_t status;
+	uint8_t user_count=0,count_step=3;
     char *value=NULL;
     bool reset_wifi=0;
     bool reset_otabeta=0;
     bool factory_reset=0;
 
-//     status = sysparam_init(SYSPARAMSECTOR, 0);
-//     if (status == SYSPARAM_OK) {
-//         status = sysparam_get_string("ota_count_step", &value);
-//         if (status == SYSPARAM_OK) {
-//             if (*value<0x34 && *value>0x30 && strlen(value)==1) count_step=*value-0x30;
-//             free(value);
-//         }
-//         status = sysparam_get_string("ota_count", &value);
-//         if (status == SYSPARAM_OK) {
-//             user_count=atoi(value);
-//             sysparam_set_string("ota_count","");
-//             free(value);
-//         }
-//     }
+    nvs_get_u8(lcm_handle,"ota_count_step", &count_step);
+    if (count_step>3 || count_step<1) count_step=3;
     UDPLGP("--- count_step=%d\n",count_step);
     
+    nvs_get_u8(lcm_handle,"ota_count", &user_count);
+    if (user_count>0) {
+        nvs_erase_key(lcm_handle,"ota_count");
+        nvs_commit(lcm_handle);
+    }
 	if (count<2) count=user_count;
     
     UDPLGP("--- count=%d\n",count);
@@ -144,58 +136,57 @@ void  ota_read_rtc() {
     UDPLGP("%s\n",value);
     if (count>4) {
         UDPLGP("IF this is NOT what you wanted, reset/power-down NOW!\n");
-        for (int i=9;i>-1;i--) {
+        for (int i=19;i>-1;i--) {
             vTaskDelay(1000/portTICK_PERIOD_MS);
             UDPLGP("%s in %d s\n",value,i);
         }
     }
-    if (factory_reset) {
-//         spiflash_erase_sector(SYSPARAMSECTOR);    spiflash_erase_sector(SYSPARAMSECTOR+SECTORSIZE);//sysparam reset
-//         for (sector=0xfb000; sector<   0x100000; sector+=SECTORSIZE) spiflash_erase_sector(sector);//Espressif area
-//         #ifndef OTABOOT    
-//          for(sector= 0x2000; sector<BOOT1SECTOR; sector+=SECTORSIZE) spiflash_erase_sector(sector);//user space
-//         #endif
-    //nvs_flash_erase();
+    if (factory_reset) {        
+        nvs_flash_deinit();
+        esp_partition_t *partition=NULL;
+        esp_partition_iterator_t it=esp_partition_find(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,NULL);
+        while (it) {
+            partition=esp_partition_get(it);
+            UDPLGP("partition: %s",partition->label);
+            if (strcmp(partition->label,"lcmcert_1") &&
+                strcmp(partition->label,"lcmcert_2") &&
+                strcmp(partition->label,"ota_data")  &&
+                #ifdef OTABOOT
+                strcmp(partition->label,"ota_0")     &&
+                #endif
+                strcmp(partition->label,"ota_1")        ) //no not erase these partitions, but all else yes
+            {
+                esp_partition_erase_range(partition,0,partition->size);
+                UDPLGP(" erased");
+            }
+            UDPLGP("\n");
+            it=esp_partition_next(it);
+        }
+        esp_partition_iterator_release(it);
+        ESP_ERROR_CHECK(nvs_flash_init());
+        nvs_open("LCM",NVS_READWRITE,&lcm_handle);
     }
 
-//     uint32_t base_addr;
-//     uint32_t num_sectors;  
-// 
-//     status = sysparam_init(SYSPARAMSECTOR, 0);
-//     if (status != SYSPARAM_OK) {
-//         status = sysparam_create_area(SYSPARAMSECTOR, 2, true);
-//         if (status == SYSPARAM_OK) {
-//             status = sysparam_init(SYSPARAMSECTOR, 0);
-//         }
-//     } else {
-//         sysparam_get_info(&base_addr, &num_sectors);
-//         if (num_sectors!=2) {
-//             status = sysparam_create_area(SYSPARAMSECTOR, 2, true);
-//             if (status == SYSPARAM_OK) {
-//                 status = sysparam_init(SYSPARAMSECTOR, 0);
-//             }
-//         }
-//     }
-//     if (status != SYSPARAM_OK) {
-//         printf("WARNING: LCM/OTA could not initialize sysparams (%d)!\n", status);
-//     }
     if (reset_wifi) {
-//         sysparam_set_string("wifi_ssid","");
-//         sysparam_set_string("wifi_password","");
-//         sysparam_compact(); //to make a copy without the ssid/password (does not erase old region)
-//         sysparam_compact(); //to make sure the information really gets wiped
-//         struct sdk_station_config sta_config; //remove esp wifi client settings
-//         memset(&sta_config, 0, sizeof(sta_config));
-//         sdk_wifi_station_set_config(&sta_config); //This wipes out the info in sectors 0xfd000+
+        wifi_config_t wifi_config = {
+            .sta = {
+                .ssid = "",
+                .password = "",
+                .scan_method = WIFI_ALL_CHANNEL_SCAN,
+                .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
+                .threshold.authmode = WIFI_AUTH_OPEN,
+                .threshold.rssi = -127,
+            },
+        };
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     }
+    
     #ifdef OTABETA
     otabeta=1; //using beta = pre-releases?
     #endif
-//     if (otabeta && !reset_otabeta) sysparam_set_bool("lcm_beta", 1);
-//     if (            reset_otabeta) sysparam_set_data("lcm_beta", NULL,0,0);
     if (otabeta && !reset_otabeta) nvs_set_u8(lcm_handle,"lcm_beta", 1);
-    if (            reset_otabeta) nvs_erase_key(lcm_handle,"ota_beta");
-    nvs_commit( lcm_handle);
+    if (            reset_otabeta) nvs_erase_key(lcm_handle,"lcm_beta");
+    nvs_commit(lcm_handle);
 }
 
 void  ota_active_sector() {
@@ -865,8 +856,8 @@ void  ota_finalize_file(int sector) {
     UDPLGP("--- ota_finalize_file\n");
 
     if (sector>2) {
-        esp_err_t err = esp_ota_set_boot_partition(NAME2SECTOR(sector));
-        if (err != ESP_OK) ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
+//         esp_err_t err = esp_ota_set_boot_partition(NAME2SECTOR(sector)); //TODO: verify if this can be removed?
+//         if (err != ESP_OK) ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
     } else {
         if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)file_first_byte,1)) UDPLGP("error writing flash\n");
     }
