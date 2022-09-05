@@ -1,5 +1,7 @@
 /*  (c) 2018-2022 HomeAccessoryKid */
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
@@ -26,6 +28,7 @@
 #include "mbedtls/ecdsa.h"
 #include "bootloader_common.h"
 #include "esp_wifi.h"
+#include "esp_sntp.h"
 
 mbedtls_ssl_config mbedtls_conf;
 mbedtls_entropy_context entropy;
@@ -98,7 +101,7 @@ void  ota_read_rtc() {
     rtc_read_busy=1;
     xTaskCreatePinnedToCore(ota_rtc_read_task,"rtcr",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
     while (rtc_read_busy) vTaskDelay(1);
-	uint8_t user_count=0,count_step=3;
+	uint8_t user_count=1,count_step=3;
     char *value=NULL;
     bool reset_wifi=0;
     bool reset_otabeta=0;
@@ -168,17 +171,30 @@ void  ota_read_rtc() {
     }
 
     if (reset_wifi) {
-        wifi_config_t wifi_config = {
-            .sta = {
-                .ssid = "",
-                .password = "",
-                .scan_method = WIFI_ALL_CHANNEL_SCAN,
-                .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
-                .threshold.authmode = WIFI_AUTH_OPEN,
-                .threshold.rssi = -127,
-            },
-        };
-        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+        esp_err_t err;
+        uint8_t *blob_data;
+        size_t   blob_size=0;
+        nvs_handle_t wifi_handle;
+        nvs_open("nvs.net80211",NVS_READWRITE,&wifi_handle);
+
+        err=nvs_get_blob(wifi_handle,"sta.ssid",NULL,&blob_size);
+        if (err==ESP_OK) {
+            blob_data=malloc(blob_size);
+            memset(blob_data,0,blob_size);
+            nvs_set_blob(wifi_handle,"sta.ssid",blob_data,blob_size);
+            free(blob_data);
+        }
+
+        err=nvs_get_blob(wifi_handle,"sta.pswd",NULL,&blob_size);
+        if (err==ESP_OK) {
+            blob_data=malloc(blob_size);
+            memset(blob_data,0,blob_size);
+            nvs_set_blob(wifi_handle,"sta.pswd",blob_data,blob_size);
+            free(blob_data);
+        }
+        
+        nvs_commit(wifi_handle);
+        nvs_close( wifi_handle);
     }
     
     #ifdef OTABETA
@@ -251,13 +267,12 @@ void  ota_init() {
 //         if (led<16) xTaskCreate(led_blink_task, "ledblink", 256, NULL, 1, &ledblinkHandle);
 //     }
 
-//     //time support
-//     const char *servers[] = {SNTP_SERVERS};
-// 	sntp_set_update_delay(24*60*60000); //SNTP will request an update every 24 hour
-// 	//const struct timezone tz = {1*60, 0}; //Set GMT+1 zone, daylight savings off
-// 	//sntp_initialize(&tz);
-// 	sntp_initialize(NULL);
-// 	sntp_set_servers(servers, sizeof(servers) / sizeof(char*)); //Servers must be configured right after initialization
+    //time support
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, "pool.ntp.org");
+    //setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0", 3); //https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
+    //tzset();
+    sntp_init();
 
     mbedtls_ecdsa_init(&mbedtls_ecdsa_ctx);
     mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.grp, MBEDTLS_ECP_DP_SECP384R1);
@@ -955,6 +970,7 @@ static uint8_t rtc_write_busy=1;
 void ota_rtc_write_task(void *arg) {
     rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
     bootloader_common_reset_rtc_retain_mem(); //this will clear RTC    
+    rtcmem->reboot_counter=1;
     rtcmem->custom[1]=1; //byte one for temp_boot signal (from app to bootloader)
     bootloader_common_update_rtc_retain_mem(NULL,false); //this will update the CRC only
     rtc_write_busy=0;
