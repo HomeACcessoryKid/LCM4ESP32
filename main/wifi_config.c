@@ -323,7 +323,7 @@ static void https_task(void *arg) {
     httpd_handle_t https_server = NULL;
     httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
 
-    extern const unsigned char cacert_pem_start[] asm("_binary_cacert_pem_start");
+    extern const unsigned char cacert_pem_start[] asm("_binary_cacert_pem_start");//TODO: make this dynamic certs
     extern const unsigned char cacert_pem_end[]   asm("_binary_cacert_pem_end");
     conf.cacert_pem = cacert_pem_start;
     conf.cacert_len = cacert_pem_end - cacert_pem_start;
@@ -703,25 +703,25 @@ void serial_input(void *arg) {
     timeleft=1000; //wait 15+ minutes
 
     while (timeleft>1) {
-//         printf( "Enter the ota repository or <enter> for " DEFAULTREPO "\n");
-//         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otarepo
-//         if (!len) strcpy(cmd_buffer,DEFAULTREPO);
-//         sysparam_set_string("ota_repo",cmd_buffer);
-//     
-//         printf("Enter the ota file or <enter> for " DEFAULTFILE "\n");
-//         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otafile
-//         if (!len) strcpy(cmd_buffer,DEFAULTFILE);
-//         sysparam_set_string("ota_file",cmd_buffer);
-//     
-//         printf("Enter the ota parameters or <enter> for \"\"\n");
-//         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the ota parameters
-//         if (!len) strcpy(cmd_buffer,"");
-//         sysparam_set_string("ota_string",cmd_buffer);
-//     
-//         printf("Enter the ota use of pre-release \"y\" or <enter> for not\n");
-//         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otabeta
-//         if (len) sysparam_set_string("ota_beta","y"); else sysparam_set_string("ota_beta","");
-//     
+        printf( "Enter the ota repository or <enter> for " DEFAULTREPO "\n");
+        len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otarepo
+        if (!len) strcpy(cmd_buffer,DEFAULTREPO);
+        nvs_set_str(lcm_handle,"ota_repo",cmd_buffer);
+    
+        printf("Enter the ota file or <enter> for " DEFAULTFILE "\n");
+        len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otafile
+        if (!len) strcpy(cmd_buffer,DEFAULTFILE);
+        nvs_set_str(lcm_handle,"ota_file",cmd_buffer);
+    
+        printf("Enter the ota parameters or <enter> for \"\"\n");
+        len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the ota parameters
+        if (!len) strcpy(cmd_buffer,"");
+        nvs_set_str(lcm_handle,"ota_string",cmd_buffer);
+    
+        printf("Enter the ota use of pre-release \"y\" or <enter> for not\n");
+        len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otabeta
+        nvs_set_u8(lcm_handle,"ota_beta", len?1:0);
+    
 //         printf("Enter the LED pin, use -15 till 15, or <enter> for not\n");
 //         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the ledpin
 //         if (len) sysparam_set_int8("led_pin",atoi(cmd_buffer)); else sysparam_set_data("led_pin", NULL,0,0);
@@ -740,23 +740,32 @@ void serial_input(void *arg) {
             wifi_config.sta.threshold.authmode=WIFI_AUTH_OPEN;
         }
 
-//         printf("Result:\n");
-//         status = sysparam_iter_start(&iter);
-//         if (status < 0) timeleft=1;
-//         while (true) {
-//             status = sysparam_iter_next(&iter);
-//             if (status != SYSPARAM_OK) break; //at the end SYSPARAM_NOTFOUND
-//             printf("'%s'=",iter.key);
-//             if (iter.binary) printf("%d\n",(int8_t)iter.value[0]);
-//             else           printf("'%s'\n",(char *)iter.value);
-//         }
-//         sysparam_iter_end(&iter);
-// 
+        printf("Result:\n");
+        char    string[64];
+        size_t  size=64;
+        uint8_t number;
+        nvs_iterator_t it = nvs_entry_find("nvs", "LCM", NVS_TYPE_ANY);
+        while (it != NULL) {
+            nvs_entry_info_t info;
+            nvs_entry_info(it, &info);
+            it = nvs_entry_next(it);
+            printf("namespace:%-15s key:%-15s type:%2d  value: ", info.namespace_name, info.key, info.type);
+            if (info.type==0x21) { //string
+                string[0]=0;
+                nvs_get_str(lcm_handle,info.key,string,&size);
+                printf("'%s'\n",string);
+            } else { //number
+                nvs_get_u8(lcm_handle,info.key,&number);
+                printf("%d\n",number);
+            }
+        }
+
         printf("\nPress <enter> if this is OK,\n"
                 "Enter any other value to try again\n");
         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the <enter>
         if (!len) {
-//             sysparam_set_string("ota_version","0.0.0");
+            nvs_set_str(lcm_handle,"ota_version","0.0.0");
+            nvs_commit(lcm_handle);
             ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
             timeleft=1;
         }

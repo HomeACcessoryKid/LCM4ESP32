@@ -149,6 +149,9 @@ void ota_task(void *arg) {
             break; //leads to boot=0 and starts updated user app
 #endif //OTABOOT
         }
+    } else {
+        UDPLGP("Repository details do not exist! Use factory reset (15ps) to start over! HALTED TILL NEXT POWERCYCLE!\n");
+        vTaskDelete(NULL);
     }
     ota_reboot(); //boot0, either the user program or the otaboot app
     vTaskDelete(NULL); //just for completeness sake, would never get till here
