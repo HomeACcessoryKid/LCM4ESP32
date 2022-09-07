@@ -2,26 +2,18 @@
 #ifndef __OTA_H__
 #define __OTA_H__
 
-// void ota_example_task(void *pvParameter);
-
-#define UDPLGP printf  //TODO: replace inline
-
-// #ifndef OTAVERSION
-//  #error You must set OTAVERSION=x.y.z of the ota code to match github version tag x.y.z
-// #endif
 #define OTAREPO  CONFIG_LCM_GITREPO
 #define MAINFILE "otamain.bin"
 #define BOOTFILE "otaboot.bin"
 #define CERTFILE "certs.sector"
 #define HOLDOFF_MULTIPLIER 20   //more like 20  -> 20s,400 (~6min),8000 (~2h),160000 (~2days)
 #define HOLDOFF_MAX 604800      //more like 604800 (1 week)
-#define BLINKDELAY 250
+// #define BLINKDELAY 250
 #define EMERGENCY "emergency"
 
 #define SECTORSIZE 4096
 #define HIGHERCERTSECTOR 2
 #define LOWERCERTSECTOR 1
-#define SYSPARAMSECTOR 0xF7000
 #define BOOT0SECTOR 3
 #define BOOT1SECTOR 4
 #define HTTPS_PORT 443
@@ -32,7 +24,6 @@
 #define RECV_BUF_LEN 1025  // current length of amazon URL 724
 #define RANGE "\r\nRange: bytes="
 #define MAXVERSIONLEN 16
-#define SNTP_SERVERS 	"0.pool.ntp.org", "1.pool.ntp.org", "2.pool.ntp.org", "3.pool.ntp.org"
 
 #define ECDSAKEYLENGTHMAX 128 //to be verified better, example is 120 bytes secP384r1
 #define HASHSIZE  48  //SHA-384

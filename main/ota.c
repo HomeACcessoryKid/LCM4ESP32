@@ -29,6 +29,7 @@
 #include "bootloader_common.h"
 #include "esp_wifi.h"
 #include "esp_sntp.h"
+#include <udplogger.h>
 
 mbedtls_ssl_config mbedtls_conf;
 mbedtls_entropy_context entropy;
@@ -820,7 +821,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                 header=0; //if header and body are separted
             } while(recv_bytes<clength);
             printf(" so far collected %d bytes\n", collected);
-//             UDPLGP(" collected %d bytes\r",        collected); //UDPLOG
+            UDPLOG(" collected %d bytes\r",        collected);
         } else {
             printf("failed, return [-0x%x]\n", -ret);
             if (!emergency) {
@@ -847,7 +848,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         buffer[collected-3],buffer[collected-2],buffer[collected-1]);
     }
 
-    UDPLGP("\n"); //UDPLOG
+    UDPLOG("\n");
     switch (retc) {
         case  0:
         case -1:
@@ -982,7 +983,7 @@ void  ota_temp_boot(void) {
     rtc_write_busy=1;
     xTaskCreatePinnedToCore(ota_rtc_write_task,"rtcw",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
     while (rtc_write_busy) vTaskDelay(1);
-    vTaskDelay(20); //allows UDPLOG to flush
+    vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
 }
 
@@ -994,7 +995,7 @@ void  ota_reboot(void) {
 //         gpio_enable(led, GPIO_INPUT);
 //         gpio_set_pullup(led, 0, 0);
 //     }
-    vTaskDelay(20); //allows UDPLOG to flush
+    vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
 }
 

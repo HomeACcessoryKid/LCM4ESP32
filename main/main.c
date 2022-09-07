@@ -20,6 +20,7 @@
 
 #include "ota.h"
 #include "wifi_config.h"
+#include <udplogger.h>
 
 void ota_task(void *arg) {
     int holdoff_time=1; //32bit, in seconds
@@ -172,6 +173,7 @@ void on_wifi_ready() {
 
 void app_main(void) {
     UDPLGP("--- app_main\n");
+    udplogger_init(3);
     ota_nvs_init();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
