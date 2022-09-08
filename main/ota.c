@@ -51,7 +51,7 @@ static byte file_first_byte[]={0xff};
 
 nvs_handle_t lcm_handle;
 void  ota_nvs_init() {
-    UDPLGP("%s %s version %s\n",esp_ota_get_app_description()->project_name,ota_boot()?"OTABOOT":"OTAMAIN",esp_ota_get_app_description()->version);
+    UDPLGP("\n\n\n\n%s %s version %s\n",esp_ota_get_app_description()->project_name,ota_boot()?"OTABOOT":"OTAMAIN",esp_ota_get_app_description()->version);
     esp_err_t err = nvs_flash_init(); // Initialize NVS
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // OTA app partition table has a smaller NVS partition size than the non-OTA
@@ -476,6 +476,7 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
             }
         }
         //ESP_LOGI(TAG, "Verifying peer X.509 certificate...");
+        //TODO: check if this really detects a non-matching certificate
         if ((flags = mbedtls_ssl_get_verify_result(ssl)) != 0) {
             bzero(buf, sizeof(buf));
             mbedtls_x509_crt_verify_info(buf, sizeof(buf), "", flags);
@@ -534,6 +535,7 @@ void  ota_set_verify(int onoff) {
 //             } while (!(ts>1073741823)); //2^30-1 which is supposed to be like 2004
             UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
             
+            //TODO: check if this really detects a non-matching certificate
             mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         }
     } else {
@@ -574,6 +576,7 @@ char* ota_get_version(char * repo) {
             printf("sent OK\n");
 
             ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
+            //TODO: recreate peek functionality
             if (ret > 0) {
                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
                 found_ptr=ota_strstr(recv_buf,"http/1.1 ");
@@ -630,6 +633,7 @@ char* ota_get_version(char * repo) {
         ;
     }
 
+    //TODO: make beta version logic work
 //     if (retc) return retc;
 //     if (ret <= 0) return ret;
 
@@ -699,6 +703,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             UDPLGP("sent OK\n");
 
             ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
+            //TODO: recreate peek functionality
             if (ret > 0) {
                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
                 found_ptr=ota_strstr(recv_buf,"http/1.1 ");
@@ -783,6 +788,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         //printf("request:\n%s\n",recv_buf);
         printf("send request......");
         ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+        //TODO: emergency mode
 //         if (emergency) ret = lwip_write(socket, recv_buf, send_bytes); else ret = wolfSSL_write(ssl, recv_buf, send_bytes);
         recv_bytes=0;
         if (ret > 0) {
@@ -792,6 +798,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             memset(recv_buf,0,RECV_BUF_LEN);
             do {
                 ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
+                //TODO: emergency mode
 //                 if (emergency) ret = lwip_read(socket, recv_buf, RECV_BUF_LEN - 1); else ret = wolfSSL_read(ssl, recv_buf, RECV_BUF_LEN - 1);
                 if (ret > 0) {
                     if (header) {
@@ -849,6 +856,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                         printf(" ");
                     }
                 } else {
+                    //TODO: emergency mode
                     if (ret && !emergency) UDPLGP("error %d\n",ret);
 //                     if (ret && !emergency) {ret=wolfSSL_get_error(ssl,ret); UDPLGP("error %d\n",ret);}
                     if (!ret && collected<length) retc = ota_connect(host2, port, &socket, &ssl); //memory leak?
@@ -860,6 +868,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             UDPLOG(" collected %d bytes\r",        collected);
         } else {
             printf("failed, return [-0x%x]\n", -ret);
+            //TODO: emergency mode
             if (!emergency) {
             }
             if (ret==-308) {
@@ -888,6 +897,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     switch (retc) {
         case  0:
         case -1:
+        //TODO: emergency mode
         if (!emergency) {
         mbedtls_ssl_session_reset(&ssl);
         }
@@ -908,7 +918,8 @@ void  ota_finalize_file(int sector) {
     UDPLGP("--- ota_finalize_file\n");
 
     if (sector>2) {
-//         esp_err_t err = esp_ota_set_boot_partition(NAME2SECTOR(sector)); //TODO: verify if this can be removed?
+        //TODO: verify if this can be removed?
+//         esp_err_t err = esp_ota_set_boot_partition(NAME2SECTOR(sector));
 //         if (err != ESP_OK) ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
     } else {
         if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)file_first_byte,1)) UDPLGP("error writing flash\n");

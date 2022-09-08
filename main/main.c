@@ -141,6 +141,7 @@ void ota_task(void *arg) {
             if (ota_compare(new_version,user_version)>0) { //can only upgrade
                 UDPLGP("user_repo=\'%s\' new_version=\'%s\' user_file=\'%s\'\n",user_repo,new_version,user_file);
                 if (!ota_get_hash(user_repo, new_version, user_file, &signature)) {
+                    //TODO: try to check if actual flash file is already there by cheking hash first
                     file_size=ota_get_file(user_repo,new_version,user_file,BOOT0SECTOR);
                     if (file_size<=0 || ota_verify_hash(BOOT0SECTOR,&signature)) continue; //something went wrong, but now boot0 is broken so start over
                     ota_finalize_file(BOOT0SECTOR); //TODO return status and if wrong, continue

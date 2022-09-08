@@ -296,6 +296,7 @@ static esp_err_t post_handler(httpd_req_t *req) {
 }
 
 static esp_err_t get_handler(httpd_req_t *req) {
+    //TODO: dynamic content
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
     httpd_resp_send_chunk(req, html_settings_header,        HTTPD_RESP_USE_STRLEN);
     httpd_resp_send_chunk(req, html_settings_middle,        HTTPD_RESP_USE_STRLEN);
@@ -744,6 +745,7 @@ void serial_input(void *arg) {
         char    string[64];
         size_t  size=64;
         uint8_t number;
+        //TODO: add readout of ssid and password here
         nvs_iterator_t it = nvs_entry_find("nvs", "LCM", NVS_TYPE_ANY);
         while (it != NULL) {
             nvs_entry_info_t info;
