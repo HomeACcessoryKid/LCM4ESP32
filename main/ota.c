@@ -51,6 +51,7 @@ static byte file_first_byte[]={0xff};
 
 nvs_handle_t lcm_handle;
 void  ota_nvs_init() {
+    UDPLGP("%s %s version %s\n",esp_ota_get_app_description()->project_name,ota_boot()?"OTABOOT":"OTAMAIN",esp_ota_get_app_description()->version);
     esp_err_t err = nvs_flash_init(); // Initialize NVS
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // OTA app partition table has a smaller NVS partition size than the non-OTA
@@ -97,8 +98,45 @@ void ota_rtc_read_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-void  ota_read_rtc() {
-    UDPLGP("--- ota_read_rtc\n");
+void  ota_pre_wifi() {
+    UDPLGP("--- ota_pre_wifi\n");
+    const esp_partition_t *partition=NULL;
+#ifdef OTABOOT
+    // checking if partition table contains the minimum parts, only the size, not the location
+    // otadata,    data,   ota,    0x09000,   0x2000,
+    // phy_init,   data,   phy,    0x0b000,   0x1000,
+    // lcmcert_1,  0x65,   0x18,   0x0c000,   0x1000,
+    // lcmcert_2,  0x65,   0x18,   0x0d000,   0x1000,
+    // nvs,        data,   nvs,    0x0e000,  0x12000,
+    // #user can redefine nvs to minimum 0x4000 and extras for total 0x12000
+    // ota_1,      app,    ota_1,  0x20000,  0xd0000,
+    // #from here, user can define rest of ptable with at least ota_0
+    // ota_0,      app,    ota_0,  0xf0000, 0x110000,
+    UDPLGP("Partition Table checking for use with LCM4ESP32\n");
+
+    partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata");
+    if (partition && partition->size==0x2000) {} else {UDPLGP("otadata not OK! ABORT\n");vTaskDelete(NULL);}
+
+    partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_PHY,"phy_init");
+    if (partition && partition->size==0x1000) {} else {UDPLGP("phy_init not OK! ABORT\n");vTaskDelete(NULL);}
+
+    partition=esp_partition_find_first(0x65,0x18,"lcmcert_1");
+    if (partition && partition->size==0x1000) {} else {UDPLGP("lcmcert_1 not OK! ABORT\n");vTaskDelete(NULL);}
+
+    partition=esp_partition_find_first(0x65,0x18,"lcmcert_2");
+    if (partition && partition->size==0x1000) {} else {UDPLGP("lcmcert_2 not OK! ABORT\n");vTaskDelete(NULL);}
+
+    partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_NVS,"nvs");
+    if (partition && partition->size>=0x4000) {} else {UDPLGP("nvs not OK! ABORT\n");vTaskDelete(NULL);}
+
+    partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_1,"ota_1");
+    if (partition && partition->size>=0xd0000) {} else {UDPLGP("ota_1 not OK! ABORT\n");vTaskDelete(NULL);}
+
+    partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_0,"ota_0");
+    if (partition && partition->size>=0xd0000) {} else {UDPLGP("ota_0 not OK! ABORT\n");vTaskDelete(NULL);}
+    
+    UDPLGP("Partition Table OK for use with LCM4ESP32\n");
+#endif
     rtc_read_busy=1;
     xTaskCreatePinnedToCore(ota_rtc_read_task,"rtcr",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
     while (rtc_read_busy) vTaskDelay(1);
@@ -147,7 +185,6 @@ void  ota_read_rtc() {
     }
     if (factory_reset) {        
         nvs_flash_deinit();
-        esp_partition_t *partition=NULL;
         esp_partition_iterator_t it=esp_partition_find(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,NULL);
         while (it) {
             partition=esp_partition_get(it);
@@ -250,7 +287,6 @@ void  ota_active_sector() {
 }
 
 void  ota_init() {
-    UDPLGP("%s %s version %s\n",esp_ota_get_app_description()->project_name,ota_boot()?"OTABOOT":"OTAMAIN",esp_ota_get_app_description()->version);
     UDPLGP("--- ota_init\n");
 
     int size=0;

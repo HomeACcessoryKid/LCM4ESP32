@@ -177,6 +177,6 @@ void app_main(void) {
     ota_nvs_init();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    ota_read_rtc(); //read RTC outcome from rboot4lcm and act accordingly
+    ota_pre_wifi(); //do stuff like read rtc, check partition table etc.
     wifi_config_init("LCM", NULL, on_wifi_ready); //expanded it with setting repo-details
 }
