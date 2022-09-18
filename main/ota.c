@@ -112,7 +112,7 @@ void  ota_pre_wifi() {
     // ota_1,      app,    ota_1,  0x20000,  0xd0000,
     // #from here, user can define rest of ptable with at least ota_0
     // ota_0,      app,    ota_0,  0xf0000, 0x110000,
-    UDPLGP("Partition Table checking for use with LCM4ESP32\n");
+    UDPLGP("Partition Table for use with LCM4ESP32 checking: ");
 
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata");
     if (partition && partition->size==0x2000) {} else {UDPLGP("otadata not OK! ABORT\n");vTaskDelete(NULL);}
@@ -135,7 +135,7 @@ void  ota_pre_wifi() {
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_0,"ota_0");
     if (partition && partition->size>=0xd0000) {} else {UDPLGP("ota_0 not OK! ABORT\n");vTaskDelete(NULL);}
     
-    UDPLGP("Partition Table OK for use with LCM4ESP32\n");
+    UDPLGP("OK\n");
 #endif
     rtc_read_busy=1;
     xTaskCreatePinnedToCore(ota_rtc_read_task,"rtcr",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations

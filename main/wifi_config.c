@@ -284,7 +284,11 @@ static esp_err_t post_handler(httpd_req_t *req) {
     if (otastr_param  && otastr_param->value)  nvs_set_str(lcm_handle,"ota_string",otastr_param->value);
     if (otabeta_param && otabeta_param->value) nvs_set_u8( lcm_handle,"ota_beta", otabeta_param->value[0]-0x30);
     if (otasrvr_param && otasrvr_param->value && strcmp(otasrvr_param->value,"not.github.com/somewhere/"))
+                                            {
                                                nvs_set_str(lcm_handle,"ota_srvr", otasrvr_param->value);
+                                               for (int i=0; i<strlen(otasrvr_param->value);i++) printf("%02x ",otasrvr_param->value[i]);
+                                               printf("\n");
+                                            }      
     nvs_commit(lcm_handle);
     form_params_free(form);
 
@@ -319,20 +323,77 @@ static const httpd_uri_t settings_post = {
     .handler   = post_handler
 };
 
+
+#define RSA_BUF_SIZE 4096
+#define RSA_KEY_SIZE 2048 //NOTE that higher than 1024 bits need to update the WDT to prevent watchdog timeout
+#define RSA_EXPONENT 65537
+#define RSA_NAME "CN=LCM4ESP32,O=HomeACcessoryKid,C=INT" //TODO: change name to softap-ssid
+static void gen_cert() {
+    mbedtls_pk_context selfsigned_key;
+    mbedtls_pk_context *key = &selfsigned_key;
+    mbedtls_x509write_cert crt;
+    unsigned char buf[RSA_BUF_SIZE];
+    mbedtls_mpi serial;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+
+    mbedtls_ctr_drbg_init( &ctr_drbg );
+    mbedtls_entropy_init( &entropy );
+    mbedtls_ctr_drbg_seed( &ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *) "LCM4ESP32_rsa_genkey", 20 );
+
+    mbedtls_mpi_init( &serial );
+    mbedtls_mpi_fill_random(&serial, 7, mbedtls_ctr_drbg_random, &ctr_drbg);
+    
+    mbedtls_pk_init( &selfsigned_key );
+    mbedtls_pk_setup( &selfsigned_key, mbedtls_pk_info_from_type( MBEDTLS_PK_RSA ) );
+    mbedtls_rsa_gen_key( mbedtls_pk_rsa( selfsigned_key ), mbedtls_ctr_drbg_random, &ctr_drbg, RSA_KEY_SIZE, RSA_EXPONENT );
+    
+    mbedtls_x509write_crt_init( &crt );
+    mbedtls_x509write_crt_set_version( &crt, MBEDTLS_X509_CRT_VERSION_3 );
+    mbedtls_x509write_crt_set_serial( &crt, &serial );
+    mbedtls_x509write_crt_set_validity( &crt, "20220222222222", "22220222222222" );
+    mbedtls_x509write_crt_set_md_alg( &crt, MBEDTLS_MD_SHA1 );
+    mbedtls_x509write_crt_set_issuer_name( &crt, RSA_NAME );
+    mbedtls_x509write_crt_set_subject_name(&crt, RSA_NAME );
+    mbedtls_x509write_crt_set_subject_key( &crt, &selfsigned_key );
+    mbedtls_x509write_crt_set_issuer_key( &crt, key );
+    mbedtls_x509write_crt_set_basic_constraints( &crt,0,0); //is not a CA
+    mbedtls_x509write_crt_set_subject_key_identifier( &crt );
+    mbedtls_x509write_crt_set_authority_key_identifier( &crt );
+    
+    mbedtls_pk_write_key_pem(&selfsigned_key, buf, sizeof( buf ));
+    printf("key_pem:\n%s\n",buf);
+    nvs_set_str(lcm_handle,"self_skey", (const char *)buf);
+    mbedtls_x509write_crt_pem( &crt, buf, sizeof( buf ), mbedtls_ctr_drbg_random, &ctr_drbg );
+    printf("crt_pem:\n%s\n",buf);
+    nvs_set_str(lcm_handle,"self_cert", (const char *)buf);
+    nvs_commit(lcm_handle);
+
+    mbedtls_ctr_drbg_free( &ctr_drbg );
+    mbedtls_entropy_free( &entropy );
+    mbedtls_mpi_free( &serial );
+    mbedtls_pk_free( &selfsigned_key );
+    mbedtls_x509write_crt_free( &crt );
+}
 static void https_task(void *arg) {
     INFO("Starting HTTPS server");
     httpd_handle_t https_server = NULL;
     httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
-
-    extern const unsigned char cacert_pem_start[] asm("_binary_cacert_pem_start");//TODO: make this dynamic certs
-    extern const unsigned char cacert_pem_end[]   asm("_binary_cacert_pem_end");
-    conf.cacert_pem = cacert_pem_start;
-    conf.cacert_len = cacert_pem_end - cacert_pem_start;
-
-    extern const unsigned char prvtkey_pem_start[] asm("_binary_prvtkey_pem_start");
-    extern const unsigned char prvtkey_pem_end[]   asm("_binary_prvtkey_pem_end");
-    conf.prvtkey_pem = prvtkey_pem_start;
-    conf.prvtkey_len = prvtkey_pem_end - prvtkey_pem_start;
+    const unsigned char    cacert_pem[RSA_BUF_SIZE];
+    const unsigned char    prvtkey_pem[RSA_BUF_SIZE];
+    size_t  size=RSA_BUF_SIZE;
+    
+    if (nvs_get_str(lcm_handle,"self_cert",(char *)cacert_pem,&size) == ESP_ERR_NVS_NOT_FOUND) {
+        gen_cert();
+        size=RSA_BUF_SIZE;
+        nvs_get_str(lcm_handle,"self_cert",(char *)cacert_pem,&size);
+    }
+    conf.cacert_pem = cacert_pem;
+    conf.cacert_len = size;
+    size=RSA_BUF_SIZE;
+    nvs_get_str(lcm_handle,"self_skey",(char *)prvtkey_pem,&size);
+    conf.prvtkey_pem = prvtkey_pem;
+    conf.prvtkey_len = size;
 
     esp_err_t ret = httpd_ssl_start(&https_server, &conf);
     if (ret == ESP_OK) {
@@ -359,7 +420,7 @@ static void https_task(void *arg) {
 }
 
 static void https_start() {
-    xTaskCreate(https_task, "wcHTTPS", 4096, NULL, 2, &context->https_task_handle);
+    xTaskCreate(https_task, "wcHTTPS", 20480, NULL, 2, &context->https_task_handle);
 }
 
 static void https_stop() {
@@ -831,7 +892,7 @@ void wifi_config_init(const char *ssid_prefix, const char *password, void (*on_w
 
     ESP_ERROR_CHECK(esp_wifi_start()); //TODO: is this the right place?
     if (wifi_config_station_connect()) {
-        xTaskCreate(serial_input,"serial" ,2048,NULL,1,&xHandle);
+        xTaskCreate(serial_input,"serial" ,4096,NULL,1,&xHandle);
         xTaskCreate(timeout_task,"timeout",2048,xHandle,1,NULL);
     }
 }
