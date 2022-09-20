@@ -324,10 +324,10 @@ static const httpd_uri_t settings_post = {
 };
 
 
-#define RSA_BUF_SIZE 4096
+#define RSA_BUF_SIZE 2048 //increase this if you increase key size
 #define RSA_KEY_SIZE 2048 //NOTE that higher than 1024 bits need to update the WDT to prevent watchdog timeout
 #define RSA_EXPONENT 65537
-#define RSA_NAME "CN=LCM4ESP32,O=HomeACcessoryKid,C=INT" //TODO: change name to softap-ssid
+#define RSA_NAME "CN=Visit_LCM4ESP32_for_help,O=http://github.com/HomeACcessoryKid,C=INT" //TODO: change name to softap-ssid
 static void gen_cert() {
     mbedtls_pk_context selfsigned_key;
     mbedtls_pk_context *key = &selfsigned_key;

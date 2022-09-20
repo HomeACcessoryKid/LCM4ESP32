@@ -176,7 +176,7 @@ void  ota_pre_wifi() {
             factory_reset=1;
     }
     UDPLGP("%s\n",value);
-    if (count>4) {
+    if (count>4+count_step) {
         UDPLGP("IF this is NOT what you wanted, reset/power-down NOW!\n");
         for (int i=19;i>-1;i--) {
             vTaskDelay(1000/portTICK_PERIOD_MS);
