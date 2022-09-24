@@ -146,6 +146,8 @@ void  ota_pre_wifi() {
     bool reset_otabeta=0;
     bool factory_reset=0;
 
+    nvs_get_u8(lcm_handle,"lcm_beta", &otabeta); //NOTE: if a key does not exist, the value remains unchanged
+    nvs_get_u8(lcm_handle,"ota_beta", &userbeta);
     nvs_get_u8(lcm_handle,"ota_count_step", &count_step);
     if (count_step>3 || count_step<1) count_step=3;
     UDPLGP("--- count_step=%d\n",count_step);
@@ -235,11 +237,8 @@ void  ota_pre_wifi() {
         nvs_close( wifi_handle);
     }
     
-    #ifdef OTABETA
-    otabeta=1; //using beta = pre-releases?
-    #endif
     if (otabeta && !reset_otabeta) nvs_set_u8(lcm_handle,"lcm_beta", 1);
-    if (            reset_otabeta) nvs_erase_key(lcm_handle,"lcm_beta");
+    if (!otabeta || reset_otabeta) nvs_erase_key(lcm_handle,"lcm_beta");
     nvs_commit(lcm_handle);
 }
 
@@ -291,8 +290,6 @@ void  ota_init() {
 
     int size=0;
     byte abyte[1];
-    nvs_get_u8(lcm_handle,"lcm_beta", &otabeta);
-    nvs_get_u8(lcm_handle,"ota_beta", &userbeta);
     UDPLGP("userbeta=\'%d\' otabeta=\'%d\'\n",userbeta,otabeta);
     
 //     uint8_t led_info=0;
@@ -547,6 +544,7 @@ void  ota_set_verify(int onoff) {
     }
 }
 
+int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte * buffer, int bufsz); //prototype needed
 char* ota_get_version(char * repo) {
     UDPLGP("--- ota_get_version\n");
 
@@ -633,33 +631,32 @@ char* ota_get_version(char * repo) {
         ;
     }
 
-    //TODO: make beta version logic work
 //     if (retc) return retc;
 //     if (ret <= 0) return ret;
 
-//     //TODO: maybe add more error return messages... like version "99999.99.99"
-//     //find latest-pre-release if joined beta program
-//     bool OTAorBTL=!(strcmp(OTAREPO,repo)&&strcmp(BTLREPO,repo));
-//     if ( (userbeta && !OTAorBTL) || (otabeta && OTAorBTL)) {
-//         prerelease[63]=0;
-//         ret=ota_get_file_ex(repo,version,"latest-pre-release",0,(byte *)prerelease,63);
-//         if (ret>0) {
-//             prerelease[ret]=0; //TODO: UNTESTED make a final 0x0a and or 0x0d optional
-//             if (prerelease[ret-1]=='\n') {
-//                 prerelease[ret-1]=0;
-//                 if (prerelease[ret-2]=='\r') prerelease[ret-2]=0;                
-//             }
-//             free(version);
-//             version=malloc(strlen(prerelease)+1);
-//             strcpy(version,prerelease);
-//         }
-//     }
-//     
-//     if (ota_boot() && ota_compare(version,OTAVERSION)<0) { //this acts when setting up a new version
-//         free(version);
-//         version=malloc(strlen(OTAVERSION)+1);
-//         strcpy(version,OTAVERSION);
-//     }
+    //TODO: maybe add more error return messages... like version "99999.99.99"
+    //find latest-pre-release if joined beta program
+    //bool OTAorBTL=!(strcmp(OTAREPO,repo)&&strcmp(BTLREPO,repo));
+    bool OTAorBTL=!(strcmp(OTAREPO,repo)); //TODO: expand if bootloader becomes updateable
+    if ( (userbeta && !OTAorBTL) || (otabeta && OTAorBTL)) {
+        prerelease[63]=0;
+        ret=ota_get_file_ex(repo,version,"latest-pre-release",0,(byte *)prerelease,63);
+        if (ret>0) {
+            prerelease[ret]=0; //TODO: UNTESTED make a final 0x0a and or 0x0d optional
+            if (prerelease[ret-1]=='\n') {
+                prerelease[ret-1]=0;
+                if (prerelease[ret-2]=='\r') prerelease[ret-2]=0;                
+            }
+            free(version);
+            version=malloc(strlen(prerelease)+1);
+            strcpy(version,prerelease);
+        }
+    }
+    if (ota_boot() && ota_compare(version,(char*)esp_ota_get_app_description()->version)<0) { //this acts when setting up a new version
+        free(version);
+        version=malloc(strlen((char*)esp_ota_get_app_description()->version)+1);
+        strcpy(version,(char*)esp_ota_get_app_description()->version);
+    }
     
     UDPLGP("%s@version:\"%s\"\n",repo,version);
     return version;

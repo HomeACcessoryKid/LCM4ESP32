@@ -777,12 +777,11 @@ void serial_input(void *arg) {
     
         printf("Enter the ota parameters or <enter> for \"\"\n");
         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the ota parameters
-        if (!len) strcpy(cmd_buffer,"");
-        nvs_set_str(lcm_handle,"ota_string",cmd_buffer);
+        if (len) nvs_set_str(lcm_handle,"ota_string",cmd_buffer);
     
         printf("Enter the ota use of pre-release \"y\" or <enter> for not\n");
         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otabeta
-        nvs_set_u8(lcm_handle,"ota_beta", len?1:0);
+        if (len) nvs_set_u8(lcm_handle,"ota_beta",1);
     
 //         printf("Enter the LED pin, use -15 till 15, or <enter> for not\n");
 //         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the ledpin
@@ -831,6 +830,9 @@ void serial_input(void *arg) {
             nvs_commit(lcm_handle);
             ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
             timeleft=1;
+//         } else {
+//             nvs_flash_erase(); //TODO: maybe erase only LCM and wifi elements?
+//             nvs_flash_init();
         }
     }
     while (1) vTaskDelay(200); //wait for the end

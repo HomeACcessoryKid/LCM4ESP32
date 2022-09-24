@@ -45,9 +45,10 @@ If you want to practice, the default settings are to load an app called lcm-demo
 It will show some basic info and reset every 30s.
 If you use 3 powercycles, it will start otamain after those 30s.
 You can learn from how this app is created how you can include this behaviour in your own app.
-It will evolve, so this description could get outdated.
+It will evolve, so this description could get outdated.  
 
-
+Considering that LCM4EP32 is getting in a useful state, beta versions are fixed in release 0.1.3  
+There is no more otabootbeta.bin anymore. Use 12 powercycles instead.
 
 
 
@@ -58,36 +59,31 @@ cd LCM4ESP32
 - initial steps to be expanded
 
 #### These are the steps if not introducing a new key pair
-- create/update the file versions1/latest-pre-release without new-line and setup 0.1.2 version folder
+- create/update the file versions1/latest-pre-release without new-line and setup 0.1.3 version folder
 ```
-echo 0.1.2 > version.txt
-mkdir versions1/0.1.2v
-echo -n 0.1.2 > versions1/0.1.2v/latest-pre-release
-cp versions1/certs.sector versions1/certs.sector.sig versions1/0.1.2v
-cp versions1/public*key*   versions1/0.1.2v
+echo 0.1.3 > version.txt
+mkdir versions1/0.1.3v
+echo -n 0.1.3 > versions1/0.1.3v/latest-pre-release
+cp versions1/certs.sector versions1/certs.sector.sig versions1/0.1.3v
+cp versions1/public*key*   versions1/0.1.3v
 ```
 - create the ota-main program
 ```
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.1.2v/otamain.bin
+mv build/LCM4ESP32.bin versions1/0.1.3v/otamain.bin
 ```
-- create the ota-boot programs
+- create the ota-boot program.  
+use 12 powercycles to get into lcm beta mode
 ```
 EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
-idf.py app
-mv build/LCM4ESP32.bin versions1/0.1.2v/otaboot.bin
-
-EXTRA_CFLAGS="-DOTABOOT -DOTABETA"
-export EXTRA_CFLAGS
-idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.1.2v/otabootbeta.bin
-cp build/partition_table/partition-table.bin versions1/0.1.2v
-cp build/bootloader/bootloader.bin versions1/0.1.2v
+cp build/LCM4ESP32.bin versions1/0.1.3v/otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.1.3v
+cp build/bootloader/bootloader.bin versions1/0.1.3v
 ```
 - remove the older version files
 #
@@ -95,8 +91,8 @@ cp build/bootloader/bootloader.bin versions1/0.1.2v
 - if you can sign the binaries locally, do so, else follow later steps
 - test otaboot for basic behaviour
 - commit and sync submodules
-- commit and sync this as version 0.1.2  
-- set up a new github release 0.1.2 as a pre-release using the just commited master...  
+- commit and sync this as version 0.1.3  
+- set up a new github release 0.1.3 as a pre-release using the just commited master...  
 - upload the certs and binaries to the pre-release assets on github  
 #
 - erase the flash and upload the privatekey
@@ -106,18 +102,18 @@ esptool.py -p /dev/cu.usbserial-* --baud 230400 write_flash 0xf9000 versions1-pr
 ```
 - upload the ota-boot BETA program to the device that contains the private key
 ```
-make flash OTAVERSION=0.1.2 OTABETA=1
+make flash OTAVERSION=0.1.3 OTABETA=1
 ```
 - power cycle to prevent the bug for software reset after flash  
 - setup wifi and select the ota-demo repo without pre-release checkbox  
 - create the 2 signature files next to the bin file and upload to github one by one  
 - verify the hashes on the computer  
 ```
-openssl sha384 versions1/0.1.2v/otamain.bin
-xxd versions1/0.1.2v/otamain.bin.sig
+openssl sha384 versions1/0.1.3v/otamain.bin
+xxd versions1/0.1.3v/otamain.bin.sig
 ```
 
-- upload the file versions1/0.1.2v/latest-pre-release to the 'latest release' assets on github
+- upload the file versions1/0.1.3v/latest-pre-release to the 'latest release' assets on github
 
 
 
