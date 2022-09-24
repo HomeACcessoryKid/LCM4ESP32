@@ -443,6 +443,7 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
     char buf[512];
     int ret, flags;
     
+    printf("free heap %d\n",xPortGetFreeHeapSize());
     mbedtls_net_init(socket);
     ESP_LOGI(TAG, "Connecting to %s:%d...", host, port);
     if ((ret = mbedtls_net_connect(socket, host,itoa(port,buf,10),MBEDTLS_NET_PROTO_TCP)) != 0) {
@@ -582,7 +583,7 @@ char* ota_get_version(char * repo) {
                 httpcode=atoi(found_ptr);
                 UDPLGP("HTTP returns %d for ",httpcode);
                 if (httpcode!=302) {
-                    mbedtls_ssl_session_reset(&ssl);
+                    mbedtls_ssl_free(&ssl);
                     mbedtls_net_free(&socket);
                     return "404";
                 }
@@ -623,7 +624,7 @@ char* ota_get_version(char * repo) {
     switch (retc) {
         case  0:
         case -1:
-        mbedtls_ssl_session_reset(&ssl);
+        mbedtls_ssl_free(&ssl);
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -708,7 +709,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                 slash=atoi(found_ptr);
                 UDPLGP("HTTP returns %d\n",slash);
                 if (slash!=302) {
-                    mbedtls_ssl_session_reset(&ssl);
+                    mbedtls_ssl_free(&ssl);
                     mbedtls_net_free(&socket);
                     return -1;
                 }
@@ -744,7 +745,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     switch (retc) {
         case  0:
         case -1:
-        mbedtls_ssl_session_reset(&ssl);
+        mbedtls_ssl_free(&ssl);
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -896,7 +897,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         case -1:
         //TODO: emergency mode
         if (!emergency) {
-        mbedtls_ssl_session_reset(&ssl);
+        mbedtls_ssl_free(&ssl);
         }
         case -2:
         mbedtls_net_free(&socket);
