@@ -59,20 +59,20 @@ cd LCM4ESP32
 - initial steps to be expanded
 
 #### These are the steps if not introducing a new key pair
-- create/update the file versions1/latest-pre-release without new-line and setup 0.1.4 version folder
+- create/update the file versions1/latest-pre-release without new-line and setup 0.1.5 version folder
 ```
-echo 0.1.4 > version.txt
-mkdir versions1/0.1.4v
-echo -n 0.1.4 > versions1/0.1.4v/latest-pre-release
-cp versions1/certs.sector versions1/certs.sector.sig versions1/0.1.4v
-cp versions1/public*key*   versions1/0.1.4v
+echo 0.1.5 > version.txt
+mkdir versions1/0.1.5v
+echo -n 0.1.5 > versions1/0.1.5v/latest-pre-release
+cp versions1/certs.sector versions1/certs.sector.sig versions1/0.1.5v
+cp versions1/public*key*   versions1/0.1.5v
 ```
 - create the ota-main program
 ```
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.1.4v/otamain.bin
+mv build/LCM4ESP32.bin versions1/0.1.5v/otamain.bin
 ```
 - create the ota-boot program.  
 use 12 powercycles to get into lcm beta mode
@@ -81,9 +81,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.1.4v/otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.1.4v
-cp build/bootloader/bootloader.bin versions1/0.1.4v
+cp build/LCM4ESP32.bin versions1/0.1.5v/otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.1.5v
+cp build/bootloader/bootloader.bin versions1/0.1.5v
 ```
 - remove the older version files
 #
@@ -91,8 +91,8 @@ cp build/bootloader/bootloader.bin versions1/0.1.4v
 - if you can sign the binaries locally, do so, else follow later steps
 - test otaboot for basic behaviour
 - commit and sync submodules
-- commit and sync this as version 0.1.4  
-- set up a new github release 0.1.4 as a pre-release using the just commited master...  
+- commit and sync this as version 0.1.5  
+- set up a new github release 0.1.5 as a pre-release using the just commited master...  
 - upload the certs and binaries to the pre-release assets on github  
 #
 - erase the flash and upload the privatekey
@@ -102,18 +102,18 @@ esptool.py -p /dev/cu.usbserial-* --baud 230400 write_flash 0xf9000 versions1-pr
 ```
 - upload the ota-boot BETA program to the device that contains the private key
 ```
-make flash OTAVERSION=0.1.4 OTABETA=1
+make flash OTAVERSION=0.1.5 OTABETA=1
 ```
 - power cycle to prevent the bug for software reset after flash  
 - setup wifi and select the ota-demo repo without pre-release checkbox  
 - create the 2 signature files next to the bin file and upload to github one by one  
 - verify the hashes on the computer  
 ```
-openssl sha384 versions1/0.1.4v/otamain.bin
-xxd versions1/0.1.4v/otamain.bin.sig
+openssl sha384 versions1/0.1.5v/otamain.bin
+xxd versions1/0.1.5v/otamain.bin.sig
 ```
 
-- upload the file versions1/0.1.4v/latest-pre-release to the 'latest release' assets on github
+- upload the file versions1/0.1.5v/latest-pre-release to the 'latest release' assets on github
 
 
 

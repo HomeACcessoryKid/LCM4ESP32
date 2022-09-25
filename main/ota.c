@@ -470,19 +470,44 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
         while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
             if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
                 ESP_LOGE(TAG, "mbedtls_ssl_handshake returned -0x%x", -ret);
-                return -1;
+                break;
             }
         }
         //ESP_LOGI(TAG, "Verifying peer X.509 certificate...");
+        // MBEDTLS_X509_BADCERT_EXPIRED          0x01  < The certificate validity has expired.
+        // MBEDTLS_X509_BADCERT_REVOKED          0x02  < The certificate has been revoked (is on a CRL).
+        // MBEDTLS_X509_BADCERT_CN_MISMATCH      0x04  < The certificate Common Name (CN) does not match with the expected CN.
+        // MBEDTLS_X509_BADCERT_NOT_TRUSTED      0x08  < The certificate is not correctly signed by the trusted CA.
+        // MBEDTLS_X509_BADCRL_NOT_TRUSTED       0x10  < The CRL is not correctly signed by the trusted CA.
+        // MBEDTLS_X509_BADCRL_EXPIRED           0x20  < The CRL is expired.
+        // MBEDTLS_X509_BADCERT_MISSING          0x40  < Certificate was missing.
+        // MBEDTLS_X509_BADCERT_SKIP_VERIFY      0x80  < Certificate verification was skipped.
+        // MBEDTLS_X509_BADCERT_OTHER          0x0100  < Other reason (can be used by verify callback)
+        // MBEDTLS_X509_BADCERT_FUTURE         0x0200  < The certificate validity starts in the future.
+        // MBEDTLS_X509_BADCRL_FUTURE          0x0400  < The CRL is from the future
+        // MBEDTLS_X509_BADCERT_KEY_USAGE      0x0800  < Usage does not match the keyUsage extension.
+        // MBEDTLS_X509_BADCERT_EXT_KEY_USAGE  0x1000  < Usage does not match the extendedKeyUsage extension.
+        // MBEDTLS_X509_BADCERT_NS_CERT_TYPE   0x2000  < Usage does not match the nsCertType extension.
+        // MBEDTLS_X509_BADCERT_BAD_MD         0x4000  < The certificate is signed with an unacceptable hash.
+        // MBEDTLS_X509_BADCERT_BAD_PK         0x8000  < The certificate is signed with an unacceptable PK alg (eg RSA vs ECDSA).
+        // MBEDTLS_X509_BADCERT_BAD_KEY      0x010000  < The certificate is signed with an unacceptable key (eg bad curve, RSA too short).
+        // MBEDTLS_X509_BADCRL_BAD_MD        0x020000  < The CRL is signed with an unacceptable hash.
+        // MBEDTLS_X509_BADCRL_BAD_PK        0x040000  < The CRL is signed with an unacceptable PK alg (eg RSA vs ECDSA).
+        // MBEDTLS_X509_BADCRL_BAD_KEY       0x080000  < The CRL is signed with an unacceptable key (eg bad curve, RSA too short).
         //TODO: check if this really detects a non-matching certificate
         if ((flags = mbedtls_ssl_get_verify_result(ssl)) != 0) {
             bzero(buf, sizeof(buf));
             mbedtls_x509_crt_verify_info(buf, sizeof(buf), "", flags);
-            ESP_LOGI(TAG, "%s", buf);
+            ESP_LOGI(TAG, "flags:0x%06x - %s", flags, buf);
         } else {
             ESP_LOGI(TAG, "Certificate verified.");
         }
         //ESP_LOGI(TAG, "Cipher suite is %s", mbedtls_ssl_get_ciphersuite(ssl));
+        if (ret) {
+            UDPLGP("LCM: BAD error, will wait 1 hour before continuing\n");
+            vTaskDelay(60*60*1000/portTICK_PERIOD_MS);
+            return -1;
+        }
     } //end SSL mode
     return 0;
 }
@@ -526,11 +551,11 @@ void  ota_set_verify(int onoff) {
             verify= 1;
 
             time_t ts;
-//             do {
+            do {
                 ts = time(NULL);
-//                 if (ts == ((time_t)-1)) printf("ts=-1, ");
-//                 vTaskDelay(1);
-//             } while (!(ts>1073741823)); //2^30-1 which is supposed to be like 2004
+                if (ts == ((time_t)-1)) printf("ts=-1, ");
+                vTaskDelay(1);
+            } while (!(ts>1654321098)); //June 4th 2022
             UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
             
             //TODO: check if this really detects a non-matching certificate
@@ -621,6 +646,10 @@ char* ota_get_version(char * repo) {
 //             UDPLGP("wolfSSL_send error = %d\n", ret);
         }
     }
+    if (retc<0) {
+        version=malloc(6);
+        strcpy(version,"0.0.0");
+    }
     switch (retc) {
         case  0:
         case -1:
@@ -632,10 +661,6 @@ char* ota_get_version(char * repo) {
         ;
     }
 
-//     if (retc) return retc;
-//     if (ret <= 0) return ret;
-
-    //TODO: maybe add more error return messages... like version "99999.99.99"
     //find latest-pre-release if joined beta program
     //bool OTAorBTL=!(strcmp(OTAREPO,repo)&&strcmp(BTLREPO,repo));
     bool OTAorBTL=!(strcmp(OTAREPO,repo)); //TODO: expand if bootloader becomes updateable
