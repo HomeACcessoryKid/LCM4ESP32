@@ -6,7 +6,6 @@
 #include "freertos/task.h"
 #include "esp_system.h"
 #include "esp_event.h"
-#include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
 #include "esp_flash_partitions.h"
@@ -445,35 +444,35 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
     
     printf("free heap %d\n",xPortGetFreeHeapSize());
     mbedtls_net_init(socket);
-    ESP_LOGI(TAG, "Connecting to %s:%d...", host, port);
+    UDPLGP("Connecting to %s:%d...\n", host, port);
     if ((ret = mbedtls_net_connect(socket, host,itoa(port,buf,10),MBEDTLS_NET_PROTO_TCP)) != 0) {
-        ESP_LOGE(TAG, "mbedtls_net_connect returned -%x", -ret);
+        UDPLGP("mbedtls_net_connect returned -%x\n", -ret);
         return -2;
     }
-    //ESP_LOGI(TAG, "Connected.");
+    //UDPLGP("Connected\n");
 
     if (port==HTTPS_PORT) { //SSL mode, in emergency mode this is skipped
         mbedtls_ssl_init(ssl);
          // Hostname set here should match CN in server certificate
         if((ret = mbedtls_ssl_set_hostname(ssl, host)) != 0) {
-            ESP_LOGE(TAG, "mbedtls_ssl_set_hostname returned -0x%x", -ret);
+            UDPLGP("mbedtls_ssl_set_hostname returned -0x%x\n", -ret);
             return -1;
         }
-        //ESP_LOGI(TAG, "SSLsetup...");
+        //UDPLGP("SSLsetup...\n");
         if ((ret = mbedtls_ssl_setup(ssl, &mbedtls_conf)) != 0) {
-            ESP_LOGE(TAG, "mbedtls_ssl_setup returned -0x%x\n\n", -ret);
+            UDPLGP("mbedtls_ssl_setup returned -0x%x\n", -ret);
             return -1;
         }
-        //ESP_LOGI(TAG, "BIOsetup...");
+        //UDPLGP("BIOsetup...\n");
         mbedtls_ssl_set_bio(ssl, socket, mbedtls_net_send, mbedtls_net_recv, NULL);
-        //ESP_LOGI(TAG, "Performing the SSL/TLS handshake...");
+        //UDPLGP("Performing the SSL/TLS handshake...\n");
         while ((ret = mbedtls_ssl_handshake(ssl)) != 0) {
             if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE) {
-                ESP_LOGE(TAG, "mbedtls_ssl_handshake returned -0x%x", -ret);
+                UDPLGP("mbedtls_ssl_handshake returned -0x%x\n", -ret);
                 break;
             }
         }
-        //ESP_LOGI(TAG, "Verifying peer X.509 certificate...");
+        //UDPLGP("Verifying peer X.509 certificate...\n");
         // MBEDTLS_X509_BADCERT_EXPIRED          0x01  < The certificate validity has expired.
         // MBEDTLS_X509_BADCERT_REVOKED          0x02  < The certificate has been revoked (is on a CRL).
         // MBEDTLS_X509_BADCERT_CN_MISMATCH      0x04  < The certificate Common Name (CN) does not match with the expected CN.
@@ -498,11 +497,11 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
         if ((flags = mbedtls_ssl_get_verify_result(ssl)) != 0) {
             bzero(buf, sizeof(buf));
             mbedtls_x509_crt_verify_info(buf, sizeof(buf), "", flags);
-            ESP_LOGI(TAG, "flags:0x%06x - %s", flags, buf);
+            UDPLGP("flags:0x%06x - %s\n", flags, buf);
         } else {
-            ESP_LOGI(TAG, "Certificate verified.");
+            UDPLGP("Certificate verified\n");
         }
-        //ESP_LOGI(TAG, "Cipher suite is %s", mbedtls_ssl_get_ciphersuite(ssl));
+        //UDPLGP("Cipher suite is %s\n", mbedtls_ssl_get_ciphersuite(ssl));
         if (ret) {
             UDPLGP("LCM: BAD error, will wait 1 hour before continuing\n");
             vTaskDelay(60*60*1000/portTICK_PERIOD_MS);
@@ -904,8 +903,8 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     if (sector>2) { //ota partitions
         esp_err_t err = esp_ota_end(handle);
         if (err != ESP_OK) {
-            if (err == ESP_ERR_OTA_VALIDATE_FAILED) ESP_LOGE(TAG, "Image validation failed, image is corrupted");
-            else ESP_LOGE(TAG, "esp_ota_end failed (%s)!", esp_err_to_name(err));
+            if (err == ESP_ERR_OTA_VALIDATE_FAILED) UDPLGP("Image validation failed, image is corrupted\n");
+            else UDPLGP("esp_ota_end failed (%s)!\n", esp_err_to_name(err));
         }
     }
     if (sector) {//cert_sectors and ota partitions
@@ -940,11 +939,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
 void  ota_finalize_file(int sector) {
     UDPLGP("--- ota_finalize_file\n");
 
-    if (sector>2) {
-        //TODO: verify if this can be removed?
-//         esp_err_t err = esp_ota_set_boot_partition(NAME2SECTOR(sector));
-//         if (err != ESP_OK) ESP_LOGE(TAG, "esp_ota_set_boot_partition failed (%s)!", esp_err_to_name(err));
-    } else {
+    if (sector<3) { //cert partitions
         if (esp_partition_write(NAME2SECTOR(sector),0,(byte *)file_first_byte,1)) UDPLGP("error writing flash\n");
     }
     //TODO: add verification and retry and if wrong return status...
@@ -1068,74 +1063,3 @@ void  ota_reboot(void) {
     vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
 }
-
-
-
-
-//===================================================
-// snippets of potentially useful code below
-//     const esp_partition_t *configured = esp_ota_get_boot_partition();
-//     const esp_partition_t *running = esp_ota_get_running_partition();
-// 
-//     if (configured != running) {
-//         ESP_LOGW(TAG, "Configured OTA boot partition at offset 0x%08x, but running from offset 0x%08x",
-//                  configured->address, running->address);
-//         ESP_LOGW(TAG, "(This can happen if either the OTA boot data or preferred boot image become corrupted somehow.)");
-//     }
-//     ESP_LOGI(TAG, "Running partition type %d subtype %d (offset 0x%08x)",
-//              running->type, running->subtype, running->address);
-// 
-//     update_partition = esp_ota_get_next_update_partition(NULL);
-//     assert(update_partition != NULL);
-//     ESP_LOGI(TAG, "Writing to partition subtype %d at offset 0x%x",
-//              update_partition->subtype, update_partition->address);
-//     bool image_header_was_checked = false;
-//             if (image_header_was_checked == false) {
-//                 esp_app_desc_t new_app_info;
-//                 if (data_read > sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t)) {
-//                     // check current version with downloading
-//                     memcpy(&new_app_info, &ota_write_data[sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t)], sizeof(esp_app_desc_t));
-//                     ESP_LOGI(TAG, "New firmware version: %s", new_app_info.version);
-// 
-//                     esp_app_desc_t running_app_info;
-//                     if (esp_ota_get_partition_description(running, &running_app_info) == ESP_OK) {
-//                         ESP_LOGI(TAG, "Running firmware version: %s", running_app_info.version);
-//                     }
-// 
-//                     const esp_partition_t* last_invalid_app = esp_ota_get_last_invalid_partition();
-//                     esp_app_desc_t invalid_app_info;
-//                     if (esp_ota_get_partition_description(last_invalid_app, &invalid_app_info) == ESP_OK) {
-//                         ESP_LOGI(TAG, "Last invalid firmware version: %s", invalid_app_info.version);
-//                     }
-// 
-//                     // check current version with last invalid partition
-//                     if (last_invalid_app != NULL) {
-//                         if (memcmp(invalid_app_info.version, new_app_info.version, sizeof(new_app_info.version)) == 0) {
-//                             ESP_LOGW(TAG, "New version is the same as invalid version.");
-//                             ESP_LOGW(TAG, "Previously, there was an attempt to launch the firmware with %s version, but it failed.", invalid_app_info.version);
-//                             ESP_LOGW(TAG, "The firmware has been rolled back to the previous version.");
-//                         }
-//                     }
-//                     if (memcmp(new_app_info.version, running_app_info.version, sizeof(new_app_info.version)) == 0) {
-//                         ESP_LOGW(TAG, "Current running version is the same as a new. We will not continue the update.");
-//                     }
-// 
-//                     image_header_was_checked = true;
-// 
-//                     err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
-//                     if (err != ESP_OK) {
-//                         ESP_LOGE(TAG, "esp_ota_begin failed (%s)", esp_err_to_name(err));
-//                         esp_ota_abort(update_handle);
-//                     }
-//                     ESP_LOGI(TAG, "esp_ota_begin succeeded");
-//                 }
-//             }
-// 
-//     err = esp_ota_end(update_handle);
-//     if (err != ESP_OK) {
-//         if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
-//             ESP_LOGE(TAG, "Image validation failed, image is corrupted");
-//         } else {
-//             ESP_LOGE(TAG, "esp_ota_end failed (%s)!", esp_err_to_name(err));
-//         }
-
