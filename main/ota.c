@@ -40,8 +40,6 @@ mbedtls_ecdsa_context mbedtls_ecdsa_ctx;
 #define NAME2SECTOR(sectorname) esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sectorname])
 char sectorlabel[][10]={"buffer","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
 
-static const char *TAG = "LCM";
-
 static int  verify = 1;
 uint8_t userbeta=0;
 uint8_t otabeta=0;
@@ -584,6 +582,7 @@ char* ota_get_version(char * repo) {
     char* found_ptr;
     char recv_buf[RECV_BUF_LEN];
     int  send_bytes; //= sizeof(send_data);
+    int  len=0;
     
     strcat(strcat(strcat(strcat(strcat(strcpy(recv_buf, \
         REQUESTHEAD),repo),"/releases/latest"),REQUESTTAIL),CONFIG_LCM_GITHOST),CRLFCRLF);
@@ -598,8 +597,7 @@ char* ota_get_version(char * repo) {
         if (ret > 0) {
             printf("sent OK\n");
 
-            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
-            //TODO: recreate peek functionality
+            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
             if (ret > 0) {
                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
                 found_ptr=ota_strstr(recv_buf,"http/1.1 ");
@@ -617,23 +615,23 @@ char* ota_get_version(char * repo) {
             }
 
             while (1) {
-//                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
-                found_ptr=ota_strstr(recv_buf,"\nlocation:");
+                recv_buf[ret+len]=0; //prevent falling of the end of the buffer when doing string operations
+                len=9; //length of "\nlocation"
+                found_ptr=ota_strstr(recv_buf,"\nlocation:"); //if not found, could be that only ':' is missing
                 if (found_ptr) break;
-//                 mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 12);
-//                 ret = mbedtls_ssl_peek(&ssl, recv_buf, RECV_BUF_LEN - 1); //peek
+                for (int i=0;i<len;i++) recv_buf[i]=recv_buf[i+RECV_BUF_LEN-1-len];
+                ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf+len, RECV_BUF_LEN-1-len);
+
                 if (ret <= 0) {
                     UDPLGP("failed, return [-0x%x]\n", -ret);
-//                     ret=wolfSSL_get_error(ssl,ret);
-//                     UDPLGP("wolfSSL_send error = %d\n", ret);
                     return "404";
                 }
             }
-//             ret=mbedtls_ssl_read(&ssl, recv_buf, found_ptr-recv_buf + 11); //flush all previous material
-//             ret=mbedtls_ssl_read(&ssl, recv_buf, RECV_BUF_LEN - 1); //this starts for sure with the content of "Location: "
-//             recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
-//             strchr(recv_buf,'\r')[0]=0;
-            strchr(found_ptr,'\r')[0]=0;
+            len=found_ptr-recv_buf+11; //this starts for sure with the content of "Location: "
+            for (int i=0;i<RECV_BUF_LEN-1-len;i++) recv_buf[i]=recv_buf[i+len]; //flush all previous material
+            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf+RECV_BUF_LEN-1-len, len); //fill recv_buf with remaining input
+            recv_buf[ret+RECV_BUF_LEN-1-len]=0; //prevent falling of the end of the buffer when doing string operations
+            strchr(recv_buf,'\r')[0]=0;
             found_ptr=ota_strstr(recv_buf,"releases/tag/");
             if (found_ptr[13]=='v' || found_ptr[13]=='V') found_ptr++;
             version=malloc(strlen(found_ptr+13)+1);
@@ -641,8 +639,6 @@ char* ota_get_version(char * repo) {
             printf("%s@version:\"%s\" according to latest release\n",repo,version);
         } else {
             UDPLGP("failed, return [-0x%x]\n", -ret);
-//             ret=wolfSSL_get_error(ssl,ret);
-//             UDPLGP("wolfSSL_send error = %d\n", ret);
         }
     }
     if (retc<0) {
@@ -702,7 +698,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     int  send_bytes; //= sizeof(send_data);
     int  length=1;
     int  clength=0;
-    int  left;
+    int  left,len=0;
     int  collected=0;
     int  writespace=0;
     int  header;
@@ -724,8 +720,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         if (ret > 0) {
             UDPLGP("sent OK\n");
 
-            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1); //peek
-            //TODO: recreate peek functionality
+            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
             if (ret > 0) {
                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
                 found_ptr=ota_strstr(recv_buf,"http/1.1 ");
@@ -742,22 +737,23 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                 return -1;
             }
             while (1) {
-//                 recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
-                found_ptr=ota_strstr(recv_buf,"\nlocation:");
+                recv_buf[ret+len]=0; //prevent falling of the end of the buffer when doing string operations
+                len=9; //length of "\nlocation"
+                found_ptr=ota_strstr(recv_buf,"\nlocation:"); //if not found, could be that only ':' is missing
                 if (found_ptr) break;
-//                 mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 12);
-//                 ret = mbedtls_ssl_peek(&ssl, recv_buf, RECV_BUF_LEN - 1); //peek
+                for (int i=0;i<len;i++) recv_buf[i]=recv_buf[i+RECV_BUF_LEN-1-len];
+                ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf+len, RECV_BUF_LEN-1-len);
+
                 if (ret <= 0) {
                     UDPLGP("failed, return [-0x%x]\n", -ret);
                     return -1;
                 }
             }
-//             ret=mbedtls_ssl_read(&ssl, recv_buf, found_ptr-recv_buf + 11); //flush all previous material
-//             ret=mbedtls_ssl_read(&ssl, recv_buf, RECV_BUF_LEN - 1); //this starts for sure with the content of "Location: "
-//             recv_buf[ret]=0; //prevent falling of the end of the buffer when doing string operations
-//             strchr(recv_buf,'\r')[0]=0;
-            strchr(found_ptr,'\r')[0]=0;
-//             found_ptr=recv_buf;
+            len=found_ptr-recv_buf+11; //this starts for sure with the content of "Location: "
+            for (int i=0;i<RECV_BUF_LEN-1-len;i++) recv_buf[i]=recv_buf[i+len]; //flush all previous material
+            ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf+RECV_BUF_LEN-1-len, len); //fill recv_buf with remaining input
+            recv_buf[ret+RECV_BUF_LEN-1-len]=0; //prevent falling of the end of the buffer when doing string operations
+            strchr(recv_buf,'\r')[0]=0;
             found_ptr=ota_strstr(recv_buf,"https://");
             //if (found_ptr[0] == ' ') found_ptr++;
             found_ptr+=8; //flush https://

@@ -21,7 +21,7 @@
 #define REQUESTHEAD "GET /"
 #define REQUESTTAIL " HTTP/1.1\r\nHost: "
 #define CRLFCRLF "\r\n\r\n"
-#define RECV_BUF_LEN 1025  // current length of amazon URL 724
+#define RECV_BUF_LEN 1025  //use 1025
 #define RANGE "\r\nRange: bytes="
 #define MAXVERSIONLEN 16
 
