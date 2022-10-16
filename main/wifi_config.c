@@ -16,7 +16,6 @@
 #define WIFI_CONFIG_CONNECT_TIMEOUT 15000
 #endif
 
-#define DEBUG(message, ...) printf(">>> wifi_config: %s: " message "\n", __func__, ##__VA_ARGS__);
 #define INFO(message, ...) printf(">>> wifi_config: " message "\n", ##__VA_ARGS__);
 #define ERROR(message, ...) printf("!!! wifi_config: " message "\n", ##__VA_ARGS__);
 
@@ -41,188 +40,89 @@ static void wifi_config_softap_start();
 static void wifi_config_softap_stop();
 
 
-// typedef struct _wifi_network_info {
-//     char ssid[33];
-//     bool secure;
-// 
-//     struct _wifi_network_info *next;
-// } wifi_network_info_t;
-// 
-// 
-// wifi_network_info_t *wifi_networks = NULL;
-// SemaphoreHandle_t wifi_networks_mutex;
-// 
-// 
-// static void wifi_scan_done_cb(void *arg, sdk_scan_status_t status)
-// {
-//     if (status != SCAN_OK)
-//     {
-//         ERROR("WiFi scan failed");
-//         return;
-//     }
-// 
-//     xSemaphoreTake(wifi_networks_mutex, portMAX_DELAY);
-// 
-//     wifi_network_info_t *wifi_network = wifi_networks;
-//     while (wifi_network) {
-//         wifi_network_info_t *next = wifi_network->next;
-//         free(wifi_network);
-//         wifi_network = next;
-//     }
-//     wifi_networks = NULL;
-// 
-//     struct sdk_bss_info *bss = (struct sdk_bss_info *)arg;
-//     // first one is invalid
-//     bss = bss->next.stqe_next;
-// 
-//     while (bss) {
-//         wifi_network_info_t *net = wifi_networks;
-//         while (net) {
-//             if (!strncmp(net->ssid, (char *)bss->ssid, sizeof(net->ssid)))
-//                 break;
-//             net = net->next;
-//         }
-//         if (!net) {
-//             wifi_network_info_t *net = malloc(sizeof(wifi_network_info_t));
-//             memset(net, 0, sizeof(*net));
-//             strncpy(net->ssid, (char *)bss->ssid, sizeof(net->ssid));
-//             net->secure = bss->authmode != AUTH_OPEN;
-//             net->next = wifi_networks;
-// 
-//             wifi_networks = net;
-//         }
-// 
-//         bss = bss->next.stqe_next;
-//     }
-// 
-//     xSemaphoreGive(wifi_networks_mutex);
-// }
-// 
-// static void wifi_scan_task(void *arg)
-// {
-//     INFO("Starting WiFi scan");
-//     while (true)
-//     {
-//         if (sdk_wifi_get_opmode() != STATIONAP_MODE)
-//             break;
-// 
-//         sdk_wifi_station_scan(NULL, wifi_scan_done_cb);
-//         vTaskDelay(10000 / portTICK_PERIOD_MS);
-//     }
-// 
-//     xSemaphoreTake(wifi_networks_mutex, portMAX_DELAY);
-// 
-//     wifi_network_info_t *wifi_network = wifi_networks;
-//     while (wifi_network) {
-//         wifi_network_info_t *next = wifi_network->next;
-//         free(wifi_network);
-//         wifi_network = next;
-//     }
-//     wifi_networks = NULL;
-// 
-//     xSemaphoreGive(wifi_networks_mutex);
-// 
-//     vTaskDelete(NULL);
-// }
-// 
-#include "index.html.h"
-// 
-// static void wifi_config_server_on_settings(client_t *client) {
-//     char *ota_repo=NULL;
-//     bool lcm_beta=0;
-//     static const char http_prologue[] =
-//         "HTTP/1.1 200 \r\n"
-//         "Content-Type: text/html; charset=utf-8\r\n"
-//         "Cache-Control: no-store\r\n"
-//         "Transfer-Encoding: chunked\r\n"
-//         "Connection: close\r\n"
-//         "\r\n";
-// 
-//     client_send(client, http_prologue, sizeof(http_prologue)-1);
-//     client_send_chunk(client, html_settings_header);
-// 
-//     char buffer[64];
-//     if (xSemaphoreTake(wifi_networks_mutex, 5000 / portTICK_PERIOD_MS)) {
-//         wifi_network_info_t *net = wifi_networks;
-//         while (net) {
-//             snprintf(
-//                 buffer, sizeof(buffer),
-//                 html_network_item,
-//                 net->secure ? "secure" : "unsecure", net->ssid
-//             );
-//             client_send_chunk(client, buffer);
-// 
-//             net = net->next;
-//         }
-// 
-//         xSemaphoreGive(wifi_networks_mutex);
-//     }
-// 
-//     client_send_chunk(client, html_settings_middle);
-//     
-//     if (sysparam_get_string("ota_repo", &ota_repo)!=SYSPARAM_OK) client_send_chunk(client, html_settings_otaparameters);
-//     else free(ota_repo);
-//     
-//     if (sysparam_get_bool("lcm_beta", &lcm_beta)==SYSPARAM_OK && lcm_beta) client_send_chunk(client, html_settings_otaserver);
-// 
-//     client_send_chunk(client, html_settings_footer);
-//     client_send_chunk(client, "");
-// }
-// 
-// 
-// static void wifi_config_server_on_settings_update(client_t *client) {
-//     DEBUG("Update settings, body = %s", client->body);
-// 
-//     form_param_t *form = form_params_parse((char *)client->body);
-//     if (!form) {
-//         client_send_redirect(client, 302, "/settings");
-//         return;
-//     }
-// 
-//     form_param_t *ssid_param = form_params_find(form, "ssid");
-//     form_param_t *password_param = form_params_find(form, "password");
-//     form_param_t *led_pin_param = form_params_find(form, "led_pin");
-//     form_param_t *led_pol_param = form_params_find(form, "led_pol");
-//     form_param_t *otarepo_param = form_params_find(form, "otarepo");
-//     form_param_t *otafile_param = form_params_find(form, "otafile");
-//     form_param_t *otastr_param  = form_params_find(form, "otastr");
-//     form_param_t *otabeta_param = form_params_find(form, "otabeta");
-//     form_param_t *otasrvr_param = form_params_find(form, "otasrvr");
-//     if (!ssid_param) {
-//         form_params_free(form);
-//         client_send_redirect(client, 302, "/settings");
-//         return;
-//     }
-// 
-//     static const char payload[] = "HTTP/1.1 204 \r\nContent-Type: text/html\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-//     client_send(client, payload, sizeof(payload)-1);
-// 
-//     sysparam_set_string("wifi_ssid", ssid_param->value);
-//     if (led_pin_param && led_pin_param->value && led_pol_param && led_pol_param->value) {
-//         if (strcmp(led_pin_param->value,"n")) 
-//              sysparam_set_int8("led_pin", (strcmp(led_pol_param->value,"1")?1:-1) * atoi(led_pin_param->value));
-//         else if (!strcmp(led_pol_param->value,"1")) sysparam_set_data("led_pin", NULL,0,0); //wipe only if "n" and ledpol=1
-//     }
-//     if (otarepo_param && otarepo_param->value) sysparam_set_string("ota_repo", otarepo_param->value);
-//     if (otafile_param && otafile_param->value) sysparam_set_string("ota_file", otafile_param->value);
-//     if (otastr_param  && otastr_param->value) sysparam_set_string("ota_string", otastr_param->value);
-//     if (otabeta_param && otabeta_param->value) sysparam_set_bool("ota_beta", otabeta_param->value[0]-0x30);
-//     if (otasrvr_param && otasrvr_param->value && strcmp(otasrvr_param->value,"not.github.com/somewhere/"))
-//                                                sysparam_set_string("ota_srvr", otasrvr_param->value);
-//     if (password_param) {
-//         sysparam_set_string("wifi_password", password_param->value);
-//     } else {
-//         sysparam_set_string("wifi_password", "");
-//     }
-//     form_params_free(form);
-// 
-//     vTaskDelay(500 / portTICK_PERIOD_MS);
-// 
-//     wifi_config_station_connect();
-// }
-// 
-// 
+typedef struct _wifi_network_info {
+    char ssid[33];
+    bool secure;
 
+    struct _wifi_network_info *next;
+} wifi_network_info_t;
+
+
+wifi_network_info_t *wifi_networks = NULL;
+SemaphoreHandle_t wifi_networks_mutex;
+
+
+static void wifi_scan_done_cb() {
+    printf("\nScan Done: ");
+    xSemaphoreTake(wifi_networks_mutex, portMAX_DELAY);
+
+    wifi_ap_record_t *ap_info;
+    uint16_t ap_count = 0;
+
+    wifi_network_info_t *wifi_network = wifi_networks;
+    while (wifi_network) {
+        wifi_network_info_t *next = wifi_network->next;
+        free(wifi_network);
+        wifi_network = next;
+    }
+    wifi_networks = NULL;
+
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
+printf("ap_count:%d\n",ap_count);
+    ap_info = (wifi_ap_record_t*)malloc(ap_count*sizeof(wifi_ap_record_t));
+    ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_info));
+
+    for (int i=0;i<ap_count;i++) {
+printf("bssid=%02x:%02x:%02x:%02x:%02x:%02x ssid:%s ch:%d %ddBm\n",ap_info[i].bssid[0],ap_info[i].bssid[1],ap_info[i].bssid[2],ap_info[i].bssid[3],ap_info[i].bssid[4],ap_info[i].bssid[5],(char *)ap_info[i].ssid,ap_info[i].primary,ap_info[i].rssi);
+        wifi_network_info_t *net = wifi_networks;
+        while (net) {
+            if (!strncmp(net->ssid, (char *)ap_info[i].ssid, sizeof(net->ssid)))
+                break;
+            net = net->next;
+        }
+        if (!net) {
+            wifi_network_info_t *net = malloc(sizeof(wifi_network_info_t));
+            memset(net, 0, sizeof(*net));
+            strncpy(net->ssid, (char *)ap_info[i].ssid, sizeof(net->ssid));
+            net->secure = ap_info[i].authmode != WIFI_AUTH_OPEN;
+            net->next = wifi_networks;
+            wifi_networks = net;
+        }
+    }
+    
+    free(ap_info);
+    
+    xSemaphoreGive(wifi_networks_mutex);
+}
+
+static void wifi_scan_task(void *arg)
+{
+    INFO("Starting WiFi scanning");
+    wifi_mode_t mode;
+    while (true) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        esp_wifi_get_mode(&mode);
+        if (mode!=WIFI_MODE_APSTA) break;
+        if (esp_wifi_scan_start(NULL, true)!=ESP_OK) continue;
+        wifi_scan_done_cb();
+    }
+
+    xSemaphoreTake(wifi_networks_mutex, portMAX_DELAY);
+
+    wifi_network_info_t *wifi_network = wifi_networks;
+    while (wifi_network) {
+        wifi_network_info_t *next = wifi_network->next;
+        free(wifi_network);
+        wifi_network = next;
+    }
+    wifi_networks = NULL;
+
+    xSemaphoreGive(wifi_networks_mutex);
+
+    vTaskDelete(NULL);
+}
+
+#include "index.html.h"
 
 static esp_err_t post_handler(httpd_req_t *req) {
     wifi_config_t wifi_config = {
@@ -300,14 +200,31 @@ static esp_err_t post_handler(httpd_req_t *req) {
 }
 
 static esp_err_t get_handler(httpd_req_t *req) {
-    //TODO: dynamic content
+    char buffer[80];
+    size_t size=80;
+    uint8_t lcmbeta=0;
+    
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
-    httpd_resp_send_chunk(req, html_settings_header,        HTTPD_RESP_USE_STRLEN);
-    httpd_resp_send_chunk(req, html_settings_middle,        HTTPD_RESP_USE_STRLEN);
-    httpd_resp_send_chunk(req, html_settings_otaparameters, HTTPD_RESP_USE_STRLEN);
-    httpd_resp_send_chunk(req, html_settings_otaserver,     HTTPD_RESP_USE_STRLEN);
-    httpd_resp_send_chunk(req, html_settings_footer,        HTTPD_RESP_USE_STRLEN);
-    httpd_resp_send_chunk(req, NULL, 0);
+    httpd_resp_send_chunk(req,     html_settings_header,        HTTPD_RESP_USE_STRLEN);
+    if (xSemaphoreTake(wifi_networks_mutex, 5000 / portTICK_PERIOD_MS)) {
+        wifi_network_info_t *net = wifi_networks;
+        while (net) {
+printf("ssid:%s,mode:%d\n",net->ssid,net->secure);
+            snprintf(buffer, sizeof(buffer),html_network_item,net->secure ? "secure" : "unsecure", net->ssid);
+            httpd_resp_send_chunk(req, buffer,                  HTTPD_RESP_USE_STRLEN);
+            net = net->next;
+        }
+        xSemaphoreGive(wifi_networks_mutex);
+    }
+    httpd_resp_send_chunk(req,     html_settings_middle,        HTTPD_RESP_USE_STRLEN);
+    if (nvs_get_str(lcm_handle,"ota_repo",buffer,&size) == ESP_ERR_NVS_NOT_FOUND) {
+        httpd_resp_send_chunk(req, html_settings_otaparameters, HTTPD_RESP_USE_STRLEN);
+    }
+    if (nvs_get_u8(lcm_handle,"lcm_beta", &lcmbeta) == ESP_OK && lcmbeta) {
+        httpd_resp_send_chunk(req, html_settings_otaserver,     HTTPD_RESP_USE_STRLEN);
+    }
+    httpd_resp_send_chunk(req,     html_settings_footer,        HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send_chunk(req,     NULL, 0);
     return ESP_OK;
 }
 
@@ -659,11 +576,11 @@ static void wifi_config_softap_start() {
     esp_netif_dhcps_start(ap_netif); //all settings seem to be automatic
     esp_wifi_set_config(ESP_IF_WIFI_AP, &softap_config);
 
-//     wifi_networks_mutex = xSemaphoreCreateBinary();
-//     xSemaphoreGive(wifi_networks_mutex);
-// 
-//     xTaskCreate(wifi_scan_task, "wifi_config scan", 2048, NULL, 2, NULL);
-// 
+    wifi_networks_mutex = xSemaphoreCreateBinary();
+    xSemaphoreGive(wifi_networks_mutex);
+
+    xTaskCreate(wifi_scan_task, "wifi_config scan", 4096, NULL, 2, NULL);
+
     dns_start();
     http_start();
     https_start();
@@ -802,25 +719,29 @@ void serial_input(void *arg) {
         }
 
         printf("Result:\n");
-        char    string[64];
-        size_t  size=64;
+        char    string[2048];
+        size_t  size;
         uint8_t number;
-        //TODO: add readout of ssid and password here
         nvs_iterator_t it = nvs_entry_find("nvs", "LCM", NVS_TYPE_ANY);
+        nvs_entry_info_t info;
         while (it != NULL) {
-            nvs_entry_info_t info;
             nvs_entry_info(it, &info);
             it = nvs_entry_next(it);
             printf("namespace:%-15s key:%-15s type:%2d  value: ", info.namespace_name, info.key, info.type);
             if (info.type==0x21) { //string
-                string[0]=0;
+                string[0]=0;size=2048;
                 nvs_get_str(lcm_handle,info.key,string,&size);
-                printf("'%s'\n",string);
+                if (strchr(string,'\n')) {
+                    printf("'\n%s' end value\n",string);
+                } else {
+                    printf("'%s'\n",string);
+                }
             } else { //number
                 nvs_get_u8(lcm_handle,info.key,&number);
                 printf("%d\n",number);
             }
         }
+        printf("SSID=%s\nPassword=%s\n",wifi_config.sta.ssid,wifi_config.sta.password);
 
         printf("\nPress <enter> if this is OK,\n"
                 "Enter any other value to try again\n");
