@@ -53,7 +53,6 @@ SemaphoreHandle_t wifi_networks_mutex;
 
 
 static void wifi_scan_done_cb() {
-    printf("\nScan Done: ");
     xSemaphoreTake(wifi_networks_mutex, portMAX_DELAY);
 
     wifi_ap_record_t *ap_info;
@@ -68,12 +67,10 @@ static void wifi_scan_done_cb() {
     wifi_networks = NULL;
 
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
-printf("ap_count:%d\n",ap_count);
     ap_info = (wifi_ap_record_t*)malloc(ap_count*sizeof(wifi_ap_record_t));
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_info));
 
     for (int i=0;i<ap_count;i++) {
-printf("bssid=%02x:%02x:%02x:%02x:%02x:%02x ssid:%s ch:%d %ddBm\n",ap_info[i].bssid[0],ap_info[i].bssid[1],ap_info[i].bssid[2],ap_info[i].bssid[3],ap_info[i].bssid[4],ap_info[i].bssid[5],(char *)ap_info[i].ssid,ap_info[i].primary,ap_info[i].rssi);
         wifi_network_info_t *net = wifi_networks;
         while (net) {
             if (!strncmp(net->ssid, (char *)ap_info[i].ssid, sizeof(net->ssid)))
@@ -205,6 +202,7 @@ static esp_err_t get_handler(httpd_req_t *req) {
     uint8_t lcmbeta=0;
     
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    httpd_resp_set_hdr(req,"Content-Type","text/html; charset=utf-8");
     httpd_resp_send_chunk(req,     html_settings_header,        HTTPD_RESP_USE_STRLEN);
     if (xSemaphoreTake(wifi_networks_mutex, 5000 / portTICK_PERIOD_MS)) {
         wifi_network_info_t *net = wifi_networks;
@@ -292,6 +290,7 @@ static void gen_cert() {
     mbedtls_pk_free( &selfsigned_key );
     mbedtls_x509write_crt_free( &crt );
 }
+
 static void https_task(void *arg) {
     INFO("Starting HTTPS server");
     httpd_handle_t https_server = NULL;
@@ -311,6 +310,7 @@ static void https_task(void *arg) {
     nvs_get_str(lcm_handle,"self_skey",(char *)prvtkey_pem,&size);
     conf.prvtkey_pem = prvtkey_pem;
     conf.prvtkey_len = size;
+    conf.port_secure = 0x443; //1091, so we have no hits from actual https-clients on port 443
 
     esp_err_t ret = httpd_ssl_start(&https_server, &conf);
     if (ret == ESP_OK) {
@@ -403,7 +403,7 @@ static void http_task(void *arg) {
         for (;;) {
             int data_len = lwip_read(fd, data, sizeof(data));
             if (data_len > 0) {
-                client_send_redirect(fd, 302, "https://192.168.4.1/settings");
+                client_send_redirect(fd, 302, "https://192.168.4.1:1091/settings");
             } else break;
 
             if (xTaskNotifyWait(0, 1, &task_value, 0) == pdTRUE) {
@@ -464,6 +464,9 @@ static void dns_task(void *arg) {
             size_t qname_len = strlen(buffer + 12) + 1;
             uint32_t reply_len = 2 + 10 + qname_len + 16 + 4;
 
+            printf("--- DNS: ");
+            for (int i=13;i<qname_len+12;i++) printf("%c",(buffer[i]>31 && buffer[i]<127)?buffer[i]:'.');
+            printf("\n");
             char *head = buffer + 2;
             *head++ = 0x80; // Flags
             *head++ = 0x00;
