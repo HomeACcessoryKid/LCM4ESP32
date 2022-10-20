@@ -6,18 +6,6 @@ menu "LCM4ESP32 Configuration"
         help
             name of the repo with the user firmware image.
 
-    config EXAMPLE_SKIP_VERSION_CHECK
-        bool "Skip firmware version check"
-        default n
-        help
-            This allows you to skip the firmware version check.
-
-    config EXAMPLE_OTA_RECV_TIMEOUT
-        int "OTA Receive Timeout"
-        default 5000
-        help
-            Maximum time for reception
-
     config LCM_GITHOST
         string "Host name of GIT release server"
         default "github.com"

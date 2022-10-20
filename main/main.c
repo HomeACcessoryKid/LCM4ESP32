@@ -31,7 +31,8 @@ void ota_task(void *arg) {
     char*  ota_version=NULL;
     signature_t signature;
     int file_size; //32bit
-    int keyid,foundkey=0;
+    uint16_t keyid;
+    int foundkey=0;
     char keyname[KEYNAMELEN];
     ota_init();
     
@@ -159,16 +160,30 @@ void ota_task(void *arg) {
     vTaskDelete(NULL); //just for completeness sake, would never get till here
 }
 
+void emergency_task(void *ota_srvr) {
+    UDPLGP("--- emergency_task\n");
+    signature_t signature;
+    
+    ota_active_sector();
+    ota_get_pubkey(active_cert_sector);
+    if (ota_get_hash(ota_srvr,EMERGENCY,BOOTFILE,&signature))       vTaskDelete(NULL);
+    if (ota_verify_signature(&signature))                           vTaskDelete(NULL);
+    if (ota_get_file(ota_srvr,EMERGENCY,BOOTFILE,BOOT0SECTOR)<=0)   vTaskDelete(NULL);
+    if (ota_verify_hash(BOOT0SECTOR,&signature))                    vTaskDelete(NULL);
+    ota_finalize_file(BOOT0SECTOR);
+    ota_reboot(); //boot0, the new otaboot app
+    vTaskDelete(NULL); //just for completeness sake, would never get till here
+}
 
 void on_wifi_ready() {
     UDPLGP("--- on_wifi_ready\n");
-//     char* ota_srvr=NULL;
-// 
-//     if (ota_emergency(&ota_srvr)){
-//         xTaskCreate(emergency_task,EMERGENCY,4096,ota_srvr,1,NULL);
-//     } else {
+    char* ota_srvr=NULL;
+
+    if (ota_emergency(&ota_srvr)){
+        xTaskCreate(emergency_task,EMERGENCY,8192,ota_srvr,5,NULL);
+    } else {
         xTaskCreate(ota_task,"ota",8192,NULL,5,NULL);
-//     }
+    }
 }
 
 

@@ -305,9 +305,6 @@ void  ota_init() {
     //tzset();
     sntp_init();
 
-    mbedtls_ecdsa_init(&mbedtls_ecdsa_ctx);
-    mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.grp, MBEDTLS_ECP_DP_SECP384R1);
-    
     ota_active_sector();
     
     do {
@@ -361,6 +358,8 @@ int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, 
     //    mbedtls_ecp_group grp;      /*!<  Elliptic curve and base point     */
     //    mbedtls_mpi d;              /*!<  our secret value                  */
     //    mbedtls_ecp_point Q;        /*!<  our public value                  */
+    mbedtls_ecdsa_init(&mbedtls_ecdsa_ctx);
+    mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.grp, MBEDTLS_ECP_DP_SECP384R1);
     ret=mbedtls_ecp_point_read_binary(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q,buffer+23,length);
     printf("keycheck: 0x%02x\n",mbedtls_ecp_check_pubkey(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q));
     UDPLGP("ret: %d\n",ret);
@@ -649,6 +648,8 @@ char* ota_get_version(char * repo) {
         case  0:
         case -1:
         mbedtls_ssl_free(&ssl);
+        mbedtls_net_free(&socket);
+        break;
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -766,6 +767,8 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         case  0:
         case -1:
         mbedtls_ssl_free(&ssl);
+        mbedtls_net_free(&socket);
+        break;
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -805,9 +808,9 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         send_bytes=strlen(recv_buf);
         //printf("request:\n%s\n",recv_buf);
         printf("send request......");
-        ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
-        //TODO: emergency mode
-//         if (emergency) ret = lwip_write(socket, recv_buf, send_bytes); else ret = wolfSSL_write(ssl, recv_buf, send_bytes);
+//         ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+        if (emergency) ret = mbedtls_net_send(&socket, (byte*)recv_buf, send_bytes); else ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+//         if (emergency) ret = lwip_write(socket.fd, recv_buf, send_bytes); else ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
         recv_bytes=0;
         if (ret > 0) {
             printf("OK\n");
@@ -815,9 +818,9 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             header=1;
             memset(recv_buf,0,RECV_BUF_LEN);
             do {
-                ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
-                //TODO: emergency mode
-//                 if (emergency) ret = lwip_read(socket, recv_buf, RECV_BUF_LEN - 1); else ret = wolfSSL_read(ssl, recv_buf, RECV_BUF_LEN - 1);
+//                 ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
+                if (emergency) ret = mbedtls_net_recv(&socket, (byte*)recv_buf, RECV_BUF_LEN - 1); else ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
+//                 if (emergency) ret = lwip_read(socket.fd, recv_buf, RECV_BUF_LEN - 1); else ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
                 if (ret > 0) {
                     if (header) {
                         //printf("%s\n-------- %d\n", recv_buf, ret);
@@ -874,9 +877,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                         printf(" ");
                     }
                 } else {
-                    //TODO: emergency mode
-                    if (ret && !emergency) UDPLGP("error %d\n",ret);
-//                     if (ret && !emergency) {ret=wolfSSL_get_error(ssl,ret); UDPLGP("error %d\n",ret);}
+                    if (ret) UDPLGP("error %d\n",ret);
                     if (!ret && collected<length) retc = ota_connect(host2, port, &socket, &ssl); //memory leak?
                     break;
                 }
@@ -886,9 +887,6 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             UDPLOG(" collected %d bytes\r",        collected);
         } else {
             printf("failed, return [-0x%x]\n", -ret);
-            //TODO: emergency mode
-            if (!emergency) {
-            }
             if (ret==-308) {
                 retc = ota_connect(host2, port, &socket, &ssl); //dangerous for eternal connecting? memory leak?
             } else {
@@ -915,10 +913,11 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     switch (retc) {
         case  0:
         case -1:
-        //TODO: emergency mode
         if (!emergency) {
-        mbedtls_ssl_free(&ssl);
+            mbedtls_ssl_free(&ssl);
         }
+        mbedtls_net_free(&socket);
+        break;
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -1058,4 +1057,23 @@ void  ota_reboot(void) {
 //     }
     vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
+}
+
+int  ota_emergency(char * *ota_srvr) {
+    UDPLGP("--- ota_emergency?\n");
+
+    if (otabeta) {
+        size_t size;
+        char* value=NULL;
+        if (nvs_get_str(lcm_handle,"ota_srvr", NULL,  &size)==ESP_OK) {
+            value = malloc(size);
+            nvs_get_str(lcm_handle,"ota_srvr", value, &size);
+            *ota_srvr=value;
+        } else return 0;
+        nvs_erase_key(lcm_handle,"ota_srvr");
+        nvs_erase_key(lcm_handle,"lcm_beta");
+        nvs_commit(lcm_handle);
+        UDPLGP("YES: backing up from http://%s\n",*ota_srvr);
+        return 1;
+    } else return 0;
 }

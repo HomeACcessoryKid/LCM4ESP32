@@ -538,7 +538,6 @@ void lcm_bootloader_utility_load_boot_image(const bootloader_state_t *bs, int st
     // first it will check if there is RTC info and boot from that, else it will load ota[0], ota[1] or factory
     ESP_LOGI("BL4LCM32", "This code is called AFTER bootloader initialization: idx=0x%x",start_index);
 
-    int unused = start_index;
     esp_partition_pos_t part;
     esp_image_metadata_t image_data;
     // void bootloader_utility_load_boot_image_from_deep_sleep(void) { //code below partly based on this
