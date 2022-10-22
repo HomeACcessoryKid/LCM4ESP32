@@ -170,6 +170,7 @@ void emergency_task(void *ota_srvr) {
     if (ota_verify_signature(&signature))                           vTaskDelete(NULL);
     if (ota_get_file(ota_srvr,EMERGENCY,BOOTFILE,BOOT0SECTOR)<=0)   vTaskDelete(NULL);
     if (ota_verify_hash(BOOT0SECTOR,&signature))                    vTaskDelete(NULL);
+    //TODO: verify if version in loaded file is higher than otamain version downloading it
     ota_finalize_file(BOOT0SECTOR);
     ota_reboot(); //boot0, the new otaboot app
     vTaskDelete(NULL); //just for completeness sake, would never get till here

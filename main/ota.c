@@ -127,10 +127,10 @@ void  ota_pre_wifi() {
     if (partition && partition->size>=0x4000) {} else {UDPLGP("nvs not OK! ABORT\n");vTaskDelete(NULL);}
 
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_1,"ota_1");
-    if (partition && partition->size>=0xd0000) {} else {UDPLGP("ota_1 not OK! ABORT\n");vTaskDelete(NULL);}
+    if (partition && partition->size>=0xc0000) {} else {UDPLGP("ota_1 not OK! ABORT\n");vTaskDelete(NULL);}
 
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_0,"ota_0");
-    if (partition && partition->size>=0xd0000) {} else {UDPLGP("ota_0 not OK! ABORT\n");vTaskDelete(NULL);}
+    if (partition && partition->size>=0xc0000) {} else {UDPLGP("ota_0 not OK! ABORT\n");vTaskDelete(NULL);}
     
     UDPLGP("OK\n");
 #endif
@@ -282,11 +282,31 @@ void  ota_active_sector() {
     UDPLGP("%s\n",sectorlabel[active_cert_sector]);
 }
 
+static void ota_get_certs() {
+    UDPLGP("--- ota_get_certs\n");
+    int size=0;
+    byte abyte[1];
+
+    do {
+        if (esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE+(size++), (byte *)abyte, 1)!=ESP_OK) {
+            UDPLGP("error reading flash\n");
+            break;
+        }
+    } while (abyte[0]!=0xff); size--;
+    UDPLGP("certs size: %d\n",size);
+    byte* certs=malloc(size);
+    esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, certs, size);
+    if (certs[size-1]==0x0a) certs[size-1]=0x00; //life-cycle-manager wolfssl uses a closing 0x0a but mbedtls requires a 0x00
+    mbedtls_x509_crt_free(&cacert);
+    mbedtls_x509_crt_init(&cacert);
+    printf("cert parse: %d errors\n",mbedtls_x509_crt_parse(&cacert,certs,size));
+    mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL);
+    free(certs);
+}
+
 void  ota_init() {
     UDPLGP("--- ota_init\n");
 
-    int size=0;
-    byte abyte[1];
     UDPLGP("userbeta=\'%d\' otabeta=\'%d\'\n",userbeta,otabeta);
     
 //     uint8_t led_info=0;
@@ -307,26 +327,13 @@ void  ota_init() {
 
     ota_active_sector();
     
-    do {
-        if (esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE+(size++), (byte *)abyte, 1)!=ESP_OK) {
-            UDPLGP("error reading flash\n");
-            break;
-        }
-    } while (abyte[0]!=0xff); size--;
-    UDPLGP("certs size: %d\n",size);
-    byte* certs=malloc(size);
-    esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, certs, size);
-    if (certs[size-1]==0x0a) certs[size-1]=0x00; //life-cycle-manager wolfssl uses a closing 0x0a but mbedtls requires a 0x00
-
     mbedtls_entropy_init(&entropy);
     mbedtls_ctr_drbg_init(&ctr_drbg);
     mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,NULL, 0);
     mbedtls_ssl_config_init(&mbedtls_conf);
     mbedtls_ssl_config_defaults(&mbedtls_conf,MBEDTLS_SSL_IS_CLIENT,MBEDTLS_SSL_TRANSPORT_STREAM,MBEDTLS_SSL_PRESET_DEFAULT);
-    mbedtls_x509_crt_init(&cacert);
-    printf("cert parse: %d errors\n",mbedtls_x509_crt_parse(&cacert,certs,size));
-    mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL);
     mbedtls_ssl_conf_rng(&mbedtls_conf, mbedtls_ctr_drbg_random, &ctr_drbg);
+    ota_get_certs();
     #ifdef CONFIG_MBEDTLS_DEBUG
         mbedtls_esp_enable_debug_log(&mbedtls_conf, CONFIG_MBEDTLS_DEBUG_LEVEL);
     #endif
@@ -490,7 +497,6 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
         // MBEDTLS_X509_BADCRL_BAD_MD        0x020000  < The CRL is signed with an unacceptable hash.
         // MBEDTLS_X509_BADCRL_BAD_PK        0x040000  < The CRL is signed with an unacceptable PK alg (eg RSA vs ECDSA).
         // MBEDTLS_X509_BADCRL_BAD_KEY       0x080000  < The CRL is signed with an unacceptable key (eg bad curve, RSA too short).
-        //TODO: check if this really detects a non-matching certificate
         if ((flags = mbedtls_ssl_get_verify_result(ssl)) != 0) {
             bzero(buf, sizeof(buf));
             mbedtls_x509_crt_verify_info(buf, sizeof(buf), "", flags);
@@ -551,8 +557,8 @@ void  ota_set_verify(int onoff) {
                 ts = time(NULL);
                 if (ts == ((time_t)-1)) printf("ts=-1, ");
                 vTaskDelay(1);
-            } while (!(ts>1654321098)); //June 4th 2022
-            UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
+            } while (!(ts>1654321098)); //June 4th 2022 1666666666)); //October 25th 2022 
+            UDPLGP("UTC-TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
             
             //TODO: check if this really detects a non-matching certificate
             mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
@@ -1007,7 +1013,7 @@ void  ota_swap_cert_sector() {
         active_cert_sector=HIGHERCERTSECTOR;
         backup_cert_sector=LOWERCERTSECTOR;
     }
-    //TODO: must setup mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL); again
+    ota_get_certs();
 }
 
 void  ota_write_status(char * version) {
