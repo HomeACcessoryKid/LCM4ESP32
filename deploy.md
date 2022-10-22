@@ -25,7 +25,7 @@ esptool.py --chip esp32 --port /dev/cu.usbserial* --baud 460800 --before default
 write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect \
 0x01000 bootloader.bin \
 0x08000 partition-table.bin \
-0xf0000 otaboot.bin
+0xe0000 otaboot.bin
 ```
 When this is done, it is recommended to monitor the serial output, but it is not essential.  
 If you do not use serial input of the initial input, otamain will start a softAP LCM-xxxx  
