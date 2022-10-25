@@ -2,9 +2,23 @@
 #ifndef __OTA_H__
 #define __OTA_H__
 
+#if CONFIG_IDF_TARGET_ESP32
+ #define MAINFILE "32otamain.bin"
+ #define BOOTFILE "32otaboot.bin"
+#elif CONFIG_IDF_TARGET_ESP32S2
+ #define MAINFILE "s2otamain.bin"
+ #define BOOTFILE "s2otaboot.bin"
+#elif CONFIG_IDF_TARGET_ESP32S3
+ #define MAINFILE "s3otamain.bin"
+ #define BOOTFILE "s3otaboot.bin"
+#elif CONFIG_IDF_TARGET_ESP32C3
+ #define MAINFILE "c3otamain.bin"
+ #define BOOTFILE "c3otaboot.bin"
+#elif CONFIG_IDF_TARGET_ESP32H2
+ #define MAINFILE "h2otamain.bin"
+ #define BOOTFILE "h2otaboot.bin"
+#endif
 #define OTAREPO  CONFIG_LCM_GITREPO
-#define MAINFILE "otamain.bin"
-#define BOOTFILE "otaboot.bin"
 #define CERTFILE "certs.sector"
 #define HOLDOFF_MULTIPLIER 20   //more like 20  -> 20s,400 (~6min),8000 (~2h),160000 (~2days)
 #define HOLDOFF_MAX 604800      //more like 604800 (1 week)

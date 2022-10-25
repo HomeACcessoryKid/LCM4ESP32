@@ -557,7 +557,7 @@ void  ota_set_verify(int onoff) {
                 ts = time(NULL);
                 if (ts == ((time_t)-1)) printf("ts=-1, ");
                 vTaskDelay(1);
-            } while (!(ts>1654321098)); //June 4th 2022 1666666666)); //October 25th 2022 
+            } while (!(ts>1666666666)); //October 25th 2022 
             UDPLGP("UTC-TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
             
             //TODO: check if this really detects a non-matching certificate
