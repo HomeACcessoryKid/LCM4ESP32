@@ -32,11 +32,11 @@ write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect \
 _ESP32S2_:
 ```
 cd to-where-you-downloaded-the-below-three-files
-esptool.py --chip esp32c3 --port /dev/cu.usbserial* --baud 460800 --before default_reset --after hard_reset \
+esptool.py --chip esp32s2 --port /dev/cu.usbserial* --baud 460800 --before default_reset --after hard_reset \
 write_flash --flash_mode dio --flash_freq 80m --flash_size detect \
-0x00000 s2bootloader.bin \
+0x01000 s2bootloader.bin \
 0x08000 s2partition-table.bin \
-0xf0000 s2otaboot.bin
+0xe0000 s2otaboot.bin
 ```
 _ESP32C3_:
 ```
