@@ -19,3 +19,20 @@ Instead the bootloader uses the powercycle count and RTC memory
 follow instructions in deploy.md for now
 
 also see Changelog.md
+
+# Life Cycle Manager32 Release and SoC Compatibility
+
+The following table shows Life Cycle Manager32 support of Espressif SoCs where ![alt text][preview] and ![alt text][supported] denote preview status and support, respectively.
+
+|Chip         |          Life Cycle Manager32 V0.9.1         |
+|:----------- |:---------------------:|
+|ESP32        |![alt text][supported] |
+|ESP32-S2     |![alt text][supported] |
+|ESP32-C3     |![alt text][supported] | 
+|ESP32-S3     |![alt text][preview]   |
+|ESP32-C2     |![alt text][preview]   |
+|ESP32-C6     |![alt text][preview]   |
+|ESP32-H2     |![alt text][preview]   | 
+
+[supported]: https://img.shields.io/badge/-supported-green "supported"
+[preview]: https://img.shields.io/badge/-preview-orange "preview"
