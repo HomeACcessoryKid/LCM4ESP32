@@ -20,11 +20,11 @@ follow instructions in deploy.md for now
 
 also see Changelog.md
 
-# Life Cycle Manager32 Release and SoC Compatibility
+# Life Cycle Manager<sup>32</sup> Release and SoC Compatibility
 
-The following table shows Life Cycle Manager32 support of Espressif SoCs where ![alt text][preview] and ![alt text][supported] denote preview status and support, respectively.
+The following table shows Life Cycle Manager<sup>32</sup> support of Espressif SoCs where ![alt text][preview] and ![alt text][supported] denote preview status and support, respectively.
 
-|Chip         |          Life Cycle Manager32 V0.9.1         |
+|Chip         |          Life Cycle Manager<sup>32</sup> V0.9.1         |
 |:----------- |:---------------------:|
 |ESP32        |![alt text][supported] |
 |ESP32-S2     |![alt text][supported] |
