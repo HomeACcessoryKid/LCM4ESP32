@@ -127,10 +127,10 @@ void  ota_pre_wifi() {
     if (partition && partition->size>=0x4000) {} else {UDPLGP("nvs not OK! ABORT\n");vTaskDelete(NULL);}
 
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_1,"ota_1");
-    if (partition && partition->size>=0xd0000) {} else {UDPLGP("ota_1 not OK! ABORT\n");vTaskDelete(NULL);}
+    if (partition && partition->size>=0xc0000) {} else {UDPLGP("ota_1 not OK! ABORT\n");vTaskDelete(NULL);}
 
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_0,"ota_0");
-    if (partition && partition->size>=0xd0000) {} else {UDPLGP("ota_0 not OK! ABORT\n");vTaskDelete(NULL);}
+    if (partition && partition->size>=0xc0000) {} else {UDPLGP("ota_0 not OK! ABORT\n");vTaskDelete(NULL);}
     
     UDPLGP("OK\n");
 #endif
@@ -282,11 +282,31 @@ void  ota_active_sector() {
     UDPLGP("%s\n",sectorlabel[active_cert_sector]);
 }
 
+static void ota_get_certs() {
+    UDPLGP("--- ota_get_certs\n");
+    int size=0;
+    byte abyte[1];
+
+    do {
+        if (esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE+(size++), (byte *)abyte, 1)!=ESP_OK) {
+            UDPLGP("error reading flash\n");
+            break;
+        }
+    } while (abyte[0]!=0xff); size--;
+    UDPLGP("certs size: %d\n",size);
+    byte* certs=malloc(size);
+    esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, certs, size);
+    if (certs[size-1]==0x0a) certs[size-1]=0x00; //life-cycle-manager wolfssl uses a closing 0x0a but mbedtls requires a 0x00
+    mbedtls_x509_crt_free(&cacert);
+    mbedtls_x509_crt_init(&cacert);
+    printf("cert parse: %d errors\n",mbedtls_x509_crt_parse(&cacert,certs,size));
+    mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL);
+    free(certs);
+}
+
 void  ota_init() {
     UDPLGP("--- ota_init\n");
 
-    int size=0;
-    byte abyte[1];
     UDPLGP("userbeta=\'%d\' otabeta=\'%d\'\n",userbeta,otabeta);
     
 //     uint8_t led_info=0;
@@ -305,31 +325,15 @@ void  ota_init() {
     //tzset();
     sntp_init();
 
-    mbedtls_ecdsa_init(&mbedtls_ecdsa_ctx);
-    mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.grp, MBEDTLS_ECP_DP_SECP384R1);
-    
     ota_active_sector();
     
-    do {
-        if (esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE+(size++), (byte *)abyte, 1)!=ESP_OK) {
-            UDPLGP("error reading flash\n");
-            break;
-        }
-    } while (abyte[0]!=0xff); size--;
-    UDPLGP("certs size: %d\n",size);
-    byte* certs=malloc(size);
-    esp_partition_read(NAME2SECTOR(active_cert_sector),PKEYSIZE, certs, size);
-    if (certs[size-1]==0x0a) certs[size-1]=0x00; //life-cycle-manager wolfssl uses a closing 0x0a but mbedtls requires a 0x00
-
     mbedtls_entropy_init(&entropy);
     mbedtls_ctr_drbg_init(&ctr_drbg);
     mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,NULL, 0);
     mbedtls_ssl_config_init(&mbedtls_conf);
     mbedtls_ssl_config_defaults(&mbedtls_conf,MBEDTLS_SSL_IS_CLIENT,MBEDTLS_SSL_TRANSPORT_STREAM,MBEDTLS_SSL_PRESET_DEFAULT);
-    mbedtls_x509_crt_init(&cacert);
-    printf("cert parse: %d errors\n",mbedtls_x509_crt_parse(&cacert,certs,size));
-    mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL);
     mbedtls_ssl_conf_rng(&mbedtls_conf, mbedtls_ctr_drbg_random, &ctr_drbg);
+    ota_get_certs();
     #ifdef CONFIG_MBEDTLS_DEBUG
         mbedtls_esp_enable_debug_log(&mbedtls_conf, CONFIG_MBEDTLS_DEBUG_LEVEL);
     #endif
@@ -361,6 +365,8 @@ int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, 
     //    mbedtls_ecp_group grp;      /*!<  Elliptic curve and base point     */
     //    mbedtls_mpi d;              /*!<  our secret value                  */
     //    mbedtls_ecp_point Q;        /*!<  our public value                  */
+    mbedtls_ecdsa_init(&mbedtls_ecdsa_ctx);
+    mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.grp, MBEDTLS_ECP_DP_SECP384R1);
     ret=mbedtls_ecp_point_read_binary(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q,buffer+23,length);
     printf("keycheck: 0x%02x\n",mbedtls_ecp_check_pubkey(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q));
     UDPLGP("ret: %d\n",ret);
@@ -491,7 +497,6 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
         // MBEDTLS_X509_BADCRL_BAD_MD        0x020000  < The CRL is signed with an unacceptable hash.
         // MBEDTLS_X509_BADCRL_BAD_PK        0x040000  < The CRL is signed with an unacceptable PK alg (eg RSA vs ECDSA).
         // MBEDTLS_X509_BADCRL_BAD_KEY       0x080000  < The CRL is signed with an unacceptable key (eg bad curve, RSA too short).
-        //TODO: check if this really detects a non-matching certificate
         if ((flags = mbedtls_ssl_get_verify_result(ssl)) != 0) {
             bzero(buf, sizeof(buf));
             mbedtls_x509_crt_verify_info(buf, sizeof(buf), "", flags);
@@ -552,8 +557,8 @@ void  ota_set_verify(int onoff) {
                 ts = time(NULL);
                 if (ts == ((time_t)-1)) printf("ts=-1, ");
                 vTaskDelay(1);
-            } while (!(ts>1654321098)); //June 4th 2022
-            UDPLGP("TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
+            } while (!(ts>1666666666)); //October 25th 2022 
+            UDPLGP("UTC-TIME: %s", ctime(&ts)); //we need to have the clock right to check certificates
             
             //TODO: check if this really detects a non-matching certificate
             mbedtls_ssl_conf_authmode(&mbedtls_conf, MBEDTLS_SSL_VERIFY_REQUIRED);
@@ -649,6 +654,8 @@ char* ota_get_version(char * repo) {
         case  0:
         case -1:
         mbedtls_ssl_free(&ssl);
+        mbedtls_net_free(&socket);
+        break;
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -766,6 +773,8 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         case  0:
         case -1:
         mbedtls_ssl_free(&ssl);
+        mbedtls_net_free(&socket);
+        break;
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -805,9 +814,9 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         send_bytes=strlen(recv_buf);
         //printf("request:\n%s\n",recv_buf);
         printf("send request......");
-        ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
-        //TODO: emergency mode
-//         if (emergency) ret = lwip_write(socket, recv_buf, send_bytes); else ret = wolfSSL_write(ssl, recv_buf, send_bytes);
+//         ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+        if (emergency) ret = mbedtls_net_send(&socket, (byte*)recv_buf, send_bytes); else ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
+//         if (emergency) ret = lwip_write(socket.fd, recv_buf, send_bytes); else ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
         recv_bytes=0;
         if (ret > 0) {
             printf("OK\n");
@@ -815,9 +824,9 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             header=1;
             memset(recv_buf,0,RECV_BUF_LEN);
             do {
-                ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
-                //TODO: emergency mode
-//                 if (emergency) ret = lwip_read(socket, recv_buf, RECV_BUF_LEN - 1); else ret = wolfSSL_read(ssl, recv_buf, RECV_BUF_LEN - 1);
+//                 ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
+                if (emergency) ret = mbedtls_net_recv(&socket, (byte*)recv_buf, RECV_BUF_LEN - 1); else ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
+//                 if (emergency) ret = lwip_read(socket.fd, recv_buf, RECV_BUF_LEN - 1); else ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
                 if (ret > 0) {
                     if (header) {
                         //printf("%s\n-------- %d\n", recv_buf, ret);
@@ -874,9 +883,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
                         printf(" ");
                     }
                 } else {
-                    //TODO: emergency mode
-                    if (ret && !emergency) UDPLGP("error %d\n",ret);
-//                     if (ret && !emergency) {ret=wolfSSL_get_error(ssl,ret); UDPLGP("error %d\n",ret);}
+                    if (ret) UDPLGP("error %d\n",ret);
                     if (!ret && collected<length) retc = ota_connect(host2, port, &socket, &ssl); //memory leak?
                     break;
                 }
@@ -886,9 +893,6 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             UDPLOG(" collected %d bytes\r",        collected);
         } else {
             printf("failed, return [-0x%x]\n", -ret);
-            //TODO: emergency mode
-            if (!emergency) {
-            }
             if (ret==-308) {
                 retc = ota_connect(host2, port, &socket, &ssl); //dangerous for eternal connecting? memory leak?
             } else {
@@ -915,10 +919,11 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
     switch (retc) {
         case  0:
         case -1:
-        //TODO: emergency mode
         if (!emergency) {
-        mbedtls_ssl_free(&ssl);
+            mbedtls_ssl_free(&ssl);
         }
+        mbedtls_net_free(&socket);
+        break;
         case -2:
         mbedtls_net_free(&socket);
         case -3:
@@ -1008,7 +1013,7 @@ void  ota_swap_cert_sector() {
         active_cert_sector=HIGHERCERTSECTOR;
         backup_cert_sector=LOWERCERTSECTOR;
     }
-    //TODO: must setup mbedtls_ssl_conf_ca_chain(&mbedtls_conf, &cacert, NULL); again
+    ota_get_certs();
 }
 
 void  ota_write_status(char * version) {
@@ -1058,4 +1063,23 @@ void  ota_reboot(void) {
 //     }
     vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
+}
+
+int  ota_emergency(char * *ota_srvr) {
+    UDPLGP("--- ota_emergency?\n");
+
+    if (otabeta) {
+        size_t size;
+        char* value=NULL;
+        if (nvs_get_str(lcm_handle,"ota_srvr", NULL,  &size)==ESP_OK) {
+            value = malloc(size);
+            nvs_get_str(lcm_handle,"ota_srvr", value, &size);
+            *ota_srvr=value;
+        } else return 0;
+        nvs_erase_key(lcm_handle,"ota_srvr");
+        nvs_erase_key(lcm_handle,"lcm_beta");
+        nvs_commit(lcm_handle);
+        UDPLGP("YES: backing up from http://%s\n",*ota_srvr);
+        return 1;
+    } else return 0;
 }
