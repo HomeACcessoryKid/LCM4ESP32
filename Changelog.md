@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2 support for LED in bootloader and LCM
+- select LED pin in serial or web interface
+- from count>1 LED will light in bootloader
+- once otamain or otaboot run, fast blink
+- factory reset will also wipe otadata partition
+- cleanup of stale code in many places
+- cosmetic fixes in deploy.md
+
 ## 0.9.1 Forking out to ESP32S2 and ESP32C3
 - renaming binaries to reflect processor
 - introduced a script to switch between processors

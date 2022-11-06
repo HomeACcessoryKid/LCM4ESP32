@@ -9,12 +9,10 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
-// #include "esp_http_client.h"
 #include "esp_flash_partitions.h"
 #include "esp_partition.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-// #include "driver/gpio.h"
 #include "errno.h"
 
 

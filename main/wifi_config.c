@@ -142,8 +142,8 @@ static esp_err_t post_handler(httpd_req_t *req) {
 
     form_param_t *ssid_param    = form_params_find(form, "ssid");
     form_param_t *password_param= form_params_find(form, "password");
-//     form_param_t *led_pin_param = form_params_find(form, "led_pin");
-//     form_param_t *led_pol_param = form_params_find(form, "led_pol");
+    form_param_t *led_pin_param = form_params_find(form, "led_pin");
+    form_param_t *led_pol_param = form_params_find(form, "led_pol");
     form_param_t *otarepo_param = form_params_find(form, "otarepo");
     form_param_t *otafile_param = form_params_find(form, "otafile");
     form_param_t *otastr_param  = form_params_find(form, "otastr");
@@ -171,11 +171,11 @@ static esp_err_t post_handler(httpd_req_t *req) {
     }
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
-//     if (led_pin_param && led_pin_param->value && led_pol_param && led_pol_param->value) {
-//         if (strcmp(led_pin_param->value,"n")) 
-//              sysparam_set_int8("led_pin", (strcmp(led_pol_param->value,"1")?1:-1) * atoi(led_pin_param->value));
-//         else if (!strcmp(led_pol_param->value,"1")) sysparam_set_data("led_pin", NULL,0,0); //wipe only if "n" and ledpol=1
-//     }
+    if (led_pin_param && led_pin_param->value && led_pol_param && led_pol_param->value) {
+        if (strcmp(led_pin_param->value,"n")) 
+             nvs_set_u8(lcm_handle,"led_pin", (strcmp(led_pol_param->value,"1")?0:128) + atoi(led_pin_param->value));
+        else if (!strcmp(led_pol_param->value,"1")) nvs_erase_key(lcm_handle,"led_pin"); //wipe only if "n" and ledpol=1
+    }
     if (otarepo_param && otarepo_param->value) nvs_set_str(lcm_handle,"ota_repo", otarepo_param->value);
     if (otafile_param && otafile_param->value) nvs_set_str(lcm_handle,"ota_file", otafile_param->value);
     if (otastr_param  && otastr_param->value)  nvs_set_str(lcm_handle,"ota_string",otastr_param->value);
@@ -660,11 +660,11 @@ size_t tty_readline(char *buffer, size_t buf_size) {
 
 int  timeleft=30; //30 seconds timeout to setup the welcome screen
 #define CMD_BUF_SIZE 80
-#define DEFAULTREPO "HomeACcessoryKid/lcm-demo"
 #define DEFAULTFILE "main.bin"
 void serial_input(void *arg) {
     char cmd_buffer[CMD_BUF_SIZE];
     size_t len;
+    int led_pin;
     wifi_config_t wifi_config = {
         .sta = {
             .scan_method = WIFI_ALL_CHANNEL_SCAN,
@@ -685,9 +685,9 @@ void serial_input(void *arg) {
     timeleft=1000; //wait 15+ minutes
 
     while (timeleft>1) {
-        printf( "Enter the ota repository or <enter> for " DEFAULTREPO "\n");
+        printf( "Enter the ota repository or <enter> for " CONFIG_LCM_REPO "\n");
         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otarepo
-        if (!len) strcpy(cmd_buffer,DEFAULTREPO);
+        if (!len) strcpy(cmd_buffer,CONFIG_LCM_REPO);
         nvs_set_str(lcm_handle,"ota_repo",cmd_buffer);
     
         printf("Enter the ota file or <enter> for " DEFAULTFILE "\n");
@@ -703,9 +703,12 @@ void serial_input(void *arg) {
         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the otabeta
         if (len) nvs_set_u8(lcm_handle,"ota_beta",1);
     
-//         printf("Enter the LED pin, use -15 till 15, or <enter> for not\n");
-//         len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the ledpin
-//         if (len) sysparam_set_int8("led_pin",atoi(cmd_buffer)); else sysparam_set_data("led_pin", NULL,0,0);
+        printf("Enter the LED pin, use -33 till 33, or <enter> for not\n");
+        len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the ledpin
+        if (len &&  atoi(cmd_buffer)) { //do not allow zero
+            led_pin=atoi(cmd_buffer); if (led_pin<0) led_pin=128-led_pin;
+            nvs_set_u8(lcm_handle,"led_pin",led_pin);
+        } else nvs_erase_key(lcm_handle,"led_pin");
     
         printf("Enter the wifi SSID\n");
         tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the SSID
@@ -822,21 +825,3 @@ void wifi_config_init(const char *ssid_prefix, const char *password, void (*on_w
         xTaskCreate(timeout_task,"timeout",2048,xHandle,1,NULL);
     }
 }
-
-
-// void wifi_config_reset() {
-//     sysparam_set_string("wifi_ssid", "");
-//     sysparam_set_string("wifi_password", "");
-// }
-// 
-// 
-// void wifi_config_get(char **ssid, char **password) {
-//     sysparam_get_string("wifi_ssid", ssid);
-//     sysparam_get_string("wifi_password", password);
-// }
-// 
-// 
-// void wifi_config_set(const char *ssid, const char *password) {
-//     sysparam_set_string("wifi_ssid", ssid);
-//     sysparam_set_string("wifi_password", password);
-// }

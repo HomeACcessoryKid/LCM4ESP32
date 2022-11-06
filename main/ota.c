@@ -12,7 +12,7 @@
 #include "esp_partition.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "driver/gpio.h"
+//#include "driver/gpio.h"
 #include "errno.h"
 #include "ota.h"
 #include "mbedtls/sha512.h" //contains sha384 support
@@ -29,6 +29,7 @@
 #include "esp_wifi.h"
 #include "esp_sntp.h"
 #include <udplogger.h>
+#include "hal/gpio_hal.h" //TODO: evaluate if using HAL is acceptable
 
 mbedtls_ssl_config mbedtls_conf;
 mbedtls_entropy_context entropy;
@@ -43,7 +44,6 @@ char sectorlabel[][10]={"buffer","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //lab
 static int  verify = 1;
 uint8_t userbeta=0;
 uint8_t otabeta=0;
-// int8_t led=16;
 static byte file_first_byte[]={0xff};
 
 nvs_handle_t lcm_handle;
@@ -80,6 +80,34 @@ char *ota_strstr(const char *full_string, const char *search) { //lowercase vers
     const int offset = (int) found - (int) lc_string;
     
     return (char *) ((int) full_string + offset);
+}
+
+uint8_t led=0;
+TaskHandle_t ledblinkHandle = NULL;
+void   led_blink_task(void *pvParameter) {
+    UDPLGP("--- led_blink_task pin %d\n",led);
+    if (led<6 || led>11) { //do not allow pins 6-11
+        // gpio_config_t io_conf = {};
+        // io_conf.intr_type = GPIO_INTR_DISABLE;
+        // io_conf.mode = GPIO_MODE_OUTPUT;
+        // io_conf.pin_bit_mask = 1ULL<<led;
+        // io_conf.pull_down_en = 0;
+        // io_conf.pull_up_en = 0;
+        // gpio_config(&io_conf);
+        // while(1) {
+        //     gpio_set_level(led, 1); vTaskDelay(BLINKDELAY/portTICK_PERIOD_MS);
+        //     gpio_set_level(led, 0); vTaskDelay(BLINKDELAY/portTICK_PERIOD_MS);
+        // }
+        gpio_ll_output_enable (&GPIO, led);
+        while(1) {
+            gpio_ll_set_level (&GPIO, led, 1); vTaskDelay(BLINKDELAY/portTICK_PERIOD_MS);
+            gpio_ll_set_level (&GPIO, led, 0); vTaskDelay(BLINKDELAY/portTICK_PERIOD_MS);
+        }
+    } else {
+        UDPLGP(": invalid pin!\n");
+    }
+    ledblinkHandle = NULL;
+    vTaskDelete(NULL);
 }
 
 static uint8_t count=0,rtc_read_busy=1;
@@ -190,7 +218,7 @@ void  ota_pre_wifi() {
             UDPLGP("partition: %s",partition->label);
             if (strcmp(partition->label,"lcmcert_1") &&
                 strcmp(partition->label,"lcmcert_2") &&
-                strcmp(partition->label,"ota_data")  &&
+                //strcmp(partition->label,"ota_data")  &&
                 #ifdef OTABOOT
                 strcmp(partition->label,"ota_0")     &&
                 #endif
@@ -237,6 +265,17 @@ void  ota_pre_wifi() {
     if (otabeta && !reset_otabeta) nvs_set_u8(lcm_handle,"lcm_beta", 1);
     if (!otabeta || reset_otabeta) nvs_erase_key(lcm_handle,"lcm_beta");
     nvs_commit(lcm_handle);
+
+    nvs_get_u8(lcm_handle,"led_pin", &led); //default is zero
+    //write value of led to ota-data partition
+    if (led) {
+        if ((partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata") ) ) {
+            esp_partition_write(partition,  0x40-4,(byte *)(uint32_t*)&led,4);
+            esp_partition_write(partition,0x4040-4,(byte *)(uint32_t*)&led,4);
+        }
+        if (led>127) led-=128;
+        if (led && led<34) xTaskCreate(led_blink_task, "ledblink", 1024, NULL, 1, &ledblinkHandle);
+    }
 }
 
 void  ota_active_sector() {
@@ -309,15 +348,20 @@ void  ota_init() {
 
     UDPLGP("userbeta=\'%d\' otabeta=\'%d\'\n",userbeta,otabeta);
     
-//     uint8_t led_info=0;
-// 
-//     status = sysparam_get_int8("led_pin", &led);
-//     if (status == SYSPARAM_OK) {
-//         if (led<0) {led_info=0x10; led=-led;}
-//         led_info+=(led<16)?(0x40+(led&0x0f)):0;
-//         if (led<16) xTaskCreate(led_blink_task, "ledblink", 256, NULL, 1, &ledblinkHandle);
-//     }
-
+    if (!ledblinkHandle) {
+        led=0;
+        nvs_get_u8(lcm_handle,"led_pin", &led); //default is zero
+        //write value of led to ota-data partition
+        if (led) {
+            const esp_partition_t *partition=NULL;
+            if ((partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata") )) {
+                esp_partition_write(partition,  0x40-4,(byte *)(uint32_t*)&led,4);
+                esp_partition_write(partition,0x4040-4,(byte *)(uint32_t*)&led,4);
+            }
+            if (led>127) led-=128;
+            if (led && led<34) xTaskCreate(led_blink_task, "ledblink", 1024, NULL, 1, &ledblinkHandle);
+        }
+    }
     //time support
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, "pool.ntp.org");
@@ -814,9 +858,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
         send_bytes=strlen(recv_buf);
         //printf("request:\n%s\n",recv_buf);
         printf("send request......");
-//         ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
         if (emergency) ret = mbedtls_net_send(&socket, (byte*)recv_buf, send_bytes); else ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
-//         if (emergency) ret = lwip_write(socket.fd, recv_buf, send_bytes); else ret = mbedtls_ssl_write(&ssl, (byte*)recv_buf, send_bytes);
         recv_bytes=0;
         if (ret > 0) {
             printf("OK\n");
@@ -824,9 +866,7 @@ int   ota_get_file_ex(char * repo, char * version, char * file, int sector, byte
             header=1;
             memset(recv_buf,0,RECV_BUF_LEN);
             do {
-//                 ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
                 if (emergency) ret = mbedtls_net_recv(&socket, (byte*)recv_buf, RECV_BUF_LEN - 1); else ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
-//                 if (emergency) ret = lwip_read(socket.fd, recv_buf, RECV_BUF_LEN - 1); else ret = mbedtls_ssl_read(&ssl, (byte*)recv_buf, RECV_BUF_LEN - 1);
                 if (ret > 0) {
                     if (header) {
                         //printf("%s\n-------- %d\n", recv_buf, ret);
@@ -1055,12 +1095,6 @@ void  ota_temp_boot(void) {
 
 void  ota_reboot(void) {
     UDPLGP("--- ota_reboot\n");
-
-//     if (ledblinkHandle) {
-//         vTaskDelete(ledblinkHandle);
-//         gpio_enable(led, GPIO_INPUT);
-//         gpio_set_pullup(led, 0, 0);
-//     }
     vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
 }

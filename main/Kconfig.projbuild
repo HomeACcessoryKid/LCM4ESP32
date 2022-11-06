@@ -4,7 +4,7 @@ menu "LCM4ESP32 Configuration"
         string "User Repo"
         default "HomeACcessorykid/lcm-demo"
         help
-            name of the repo with the user firmware image.
+            name of the repo with the default user firmware image.
 
     config LCM_GITHOST
         string "Host name of GIT release server"
