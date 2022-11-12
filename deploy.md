@@ -27,7 +27,7 @@ esptool.py --chip esp32 --port /dev/cu.usb* --baud 460800 --before default_reset
 write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect \
 0x01000 32bootloader.bin \
 0x08000 32partition-table.bin \
-0xe0000 32otaboot.bin
+0xf0000 32otaboot.bin
 ```
 _ESP32S2_:
 ```
@@ -36,16 +36,16 @@ esptool.py --chip esp32s2 --port /dev/cu.usb* --baud 460800 --before default_res
 write_flash --flash_mode dio --flash_freq 80m --flash_size detect \
 0x01000 s2bootloader.bin \
 0x08000 s2partition-table.bin \
-0xe0000 s2otaboot.bin
+0xf0000 s2otaboot.bin
 ```
 _ESP32C3_:
 ```
 cd to-where-you-downloaded-the-below-three-files
 esptool.py --chip esp32c3 --port /dev/cu.usb* --baud 460800 --before default_reset --after hard_reset \
 write_flash --flash_mode dio --flash_freq 80m --flash_size detect \
-0x00000 c3bootloader.bin \
-0x08000 c3partition-table.bin \
-0xf0000 c3otaboot.bin
+0x000000 c3bootloader.bin \
+0x008000 c3partition-table.bin \
+0x100000 c3otaboot.bin
 ```
 When this is done, it is recommended to monitor the serial output, but it is not essential.  
 If you do not use serial input of the initial input, otamain will start a softAP LCM-xxxx  
@@ -84,13 +84,13 @@ cd LCM4ESP32
 - initial steps to be expanded
 
 #### These are the steps if not introducing a new key pair
-- create/update the file versions1/latest-pre-release without new-line and setup 0.9.2 version folder
+- create/update the file versions1/latest-pre-release without new-line and setup 0.9.8 version folder
 ```
-echo 0.9.2 > version.txt
-mkdir versions1/0.9.2v
-echo -n 0.9.2 > versions1/0.9.2v/latest-pre-release
-cp versions1/certs.sector versions1/certs.sector.sig versions1/0.9.2v
-cp versions1/public*key*   versions1/0.9.2v
+echo 0.9.8 > version.txt
+mkdir versions1/0.9.8v
+echo -n 0.9.8 > versions1/0.9.8v/latest-pre-release
+cp versions1/certs.sector versions1/certs.sector.sig versions1/0.9.8v
+cp versions1/public*key*   versions1/0.9.8v
 ```
 _for esp32s2_
 ```
@@ -103,7 +103,7 @@ cp x-s2partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.9.2v/s2otamain.bin
+mv build/LCM4ESP32.bin versions1/0.9.8v/s2otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -111,9 +111,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.9.2v/s2otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.9.2v/s2partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.9.2v/s2bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.9.8v/s2otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.9.8v/s2partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.9.8v/s2bootloader.bin
 ```
 _for esp32c3_
 ```
@@ -126,7 +126,7 @@ cp x-c3partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.9.2v/c3otamain.bin
+mv build/LCM4ESP32.bin versions1/0.9.8v/c3otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -134,9 +134,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.9.2v/c3otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.9.2v/c3partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.9.2v/c3bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.9.8v/c3otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.9.8v/c3partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.9.8v/c3bootloader.bin
 ```
 _for esp32_
 ```
@@ -149,7 +149,7 @@ cp x-32partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.9.2v/32otamain.bin
+mv build/LCM4ESP32.bin versions1/0.9.8v/32otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -157,9 +157,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.9.2v/32otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.9.2v/32partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.9.2v/32bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.9.8v/32otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.9.8v/32partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.9.8v/32bootloader.bin
 ```
 
 - remove the older version files
@@ -196,9 +196,14 @@ rm hash len sign
 
 ### _use 12 powercycles to get into lcm beta mode if that is what you want_
 - test otaboot for basic behaviour
-- commit and sync submodules
-- commit and sync this as version 0.9.2  
-- set up a new github release 0.9.2 as a pre-release using the just commited master...  
+- commit and sync submodules (not applicable for now)
+- commit this locally with the description of version 0.9.8 taken from Changelog
+- add the version tag and push to github
+```
+git tag 0.9.8 HEAD
+git push --tags origin HEAD
+```
+- on Github website, set up a new github release 0.9.8 as a pre-release using the just commited master...  
 - upload the certs and binaries to the pre-release assets on github  
 #
 - erase the flash and upload the privatekey
@@ -208,17 +213,17 @@ esptool.py -p /dev/cu.usbserial-* --baud 230400 write_flash 0xf9000 versions1-pr
 ```
 - upload the ota-boot BETA program to the device that contains the private key
 ```
-make flash OTAVERSION=0.9.2 OTABETA=1
+make flash OTAVERSION=0.9.8 OTABETA=1
 ```
 - setup wifi and select the ota-demo repo without pre-release checkbox  
 - create the 2 signature files next to the bin file and upload to github one by one  
 - verify the hashes on the computer  
 ```
-openssl sha384 versions1/0.9.2v/otamain.bin
-xxd versions1/0.9.2v/otamain.bin.sig
+openssl sha384 versions1/0.9.8v/otamain.bin
+xxd versions1/0.9.8v/otamain.bin.sig
 ```
 
-- upload the file versions1/0.9.2v/latest-pre-release to the 'latest release' assets on github
+- upload the file versions1/0.9.8v/latest-pre-release to the 'latest release' assets on github
 
 <br>
 <br>

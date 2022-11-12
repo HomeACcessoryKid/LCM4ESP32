@@ -12,7 +12,6 @@
 #include "esp_partition.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-//#include "driver/gpio.h"
 #include "errno.h"
 #include "ota.h"
 #include "mbedtls/sha512.h" //contains sha384 support
@@ -1095,6 +1094,10 @@ void  ota_temp_boot(void) {
 
 void  ota_reboot(void) {
     UDPLGP("--- ota_reboot\n");
+    if (ledblinkHandle) {
+        vTaskDelete(ledblinkHandle);
+        gpio_ll_output_disable (&GPIO, led);
+    }
     vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
 }

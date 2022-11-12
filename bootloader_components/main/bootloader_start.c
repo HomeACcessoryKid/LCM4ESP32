@@ -25,7 +25,7 @@ void __attribute__((noreturn)) call_start_cpu0(void) {
     // 2. Load partition table
     bootloader_state_t bs = {0};
     if (!bootloader_utility_load_partition_table(&bs)) {
-        ESP_LOGE("BL4LCM32", "load partition table error!");
+        esp_rom_printf("BL4LCM32: load partition table error!\n");
         bootloader_reset();
     }
 
@@ -35,7 +35,7 @@ void __attribute__((noreturn)) call_start_cpu0(void) {
     
     // 4. store count in RTC for LCM to act on it and collect the temp_boot flag
     bool temp_boot=lcm_bootloader_rtc(count);
-    ESP_LOGI("BL4LCM32","count=%d temp_boot=%d",count,temp_boot);
+    esp_rom_printf("BL4LCM32: count=%d temp_boot=%d\n",count,temp_boot);
     
     // 5. based on count and temp_boot, set boot_index to 0 or 1
     #define COUNT4USER 4 //powercycle count that will not yet trigger LCM

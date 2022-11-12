@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.8 release candidate for 1.0
+- made a first version of the README
+- take care led is off after download
+- moved to esp idf 4.4.3
+- partition sizes increased for future expansion
+- ledinfo on webconfig fixed (inverted)
+- removed unused files from bootloader
+
 ## 0.9.2 support for LED in bootloader and LCM
 - select LED pin in serial or web interface
 - from count>1 LED will light in bootloader

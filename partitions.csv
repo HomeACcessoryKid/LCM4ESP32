@@ -1,4 +1,4 @@
-# ESP-IDF Partition Table
+# ESP-IDF Partition Table for ESP32
 # Name,     Type,  SubType,  Offset,     Size, Flags
 # partition table           0x08000,   0x1000,
 otadata,    data,   ota,    0x09000,   0x2000,
@@ -7,6 +7,6 @@ lcmcert_1,  0x65,   0x18,   0x0c000,   0x1000,
 lcmcert_2,  0x65,   0x18,   0x0d000,   0x1000,
 nvs,        data,   nvs,    0x0e000,  0x12000,
 #user can redefine nvs to minimum 0x4000 and extras for total 0x12000
-ota_1,      app,    ota_1,  0x20000,  0xc0000,
+ota_1,      app,    ota_1,  0x20000,  0xd0000,
 #from here, user can define rest of ptable with at least ota_0 at least as big as ota_1
-ota_0,      app,    ota_0,  0xe0000, 0x320000,
+ota_0,      app,    ota_0,  0xf0000, 0x310000,

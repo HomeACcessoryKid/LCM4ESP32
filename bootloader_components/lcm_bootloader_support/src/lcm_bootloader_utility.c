@@ -196,12 +196,12 @@ the last byte will contain the amount of open continue-bits and is a signal for 
 	    polarity=buff0&0x80?1:0; led_pin=buff0&0x7f;
 	    if ( led_pin>=6 && led_pin<=11 ) led_pin=0; //do not allow pins 0 and 6-11
 	    //TODO: make this chiptype dependent
-        ets_printf("led_pin=%d,  polarity=%d\n",led_pin,polarity);
+        esp_rom_printf("BL4LCM32: led_pin=%d,  polarity=%d\n",led_pin,polarity);
     } //else no led, encoded as led_pin=0
 
     if (count>1 && count<16) { //some devices have trouble to find the right timing for a power cycle so delay*3
         if (led_pin) {
-            esp_rom_printf("LED ON\n");
+            esp_rom_printf("BL4LCM32: LED ON\n");
             gpio_ll_output_enable (&GPIO, led_pin);
             gpio_ll_set_level (&GPIO, led_pin, 1-polarity);
         }
@@ -210,7 +210,7 @@ the last byte will contain the amount of open continue-bits and is a signal for 
     if (count<16) esp_rom_delay_us(BOOT_CYCLE_DELAY_MICROS);
 //==================================================//if we powercycle, this is where it stops!
     if (led_pin && count>1 && count<16) {
-        esp_rom_printf("and OFF\n");
+        esp_rom_printf("          and OFF\n");
         gpio_ll_output_disable(&GPIO, led_pin);
     }
 

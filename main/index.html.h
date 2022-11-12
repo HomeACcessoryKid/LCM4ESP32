@@ -89,7 +89,7 @@ const char *html_settings_middle =
 "                is LedPin"
 "                </label>"
 "                <label for=\"led_pol\">"
-"                . If active on '1'"
+"                . If active on '0'"
 "                <input name=\"led_pol\" type=\"hidden\" value=\"0\" />"
 "                <input type=\"checkbox\" value=\"1\" name=\"led_pol\" id=\"led_pol\" />"
 "                </label>"
