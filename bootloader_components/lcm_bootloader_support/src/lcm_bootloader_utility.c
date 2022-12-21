@@ -58,7 +58,6 @@
 #endif
 
 #include "soc/soc.h"
-#include "soc/cpu.h"
 #include "soc/rtc.h"
 #include "soc/gpio_periph.h"
 #include "soc/efuse_periph.h"
