@@ -7,6 +7,7 @@
 #include "esp_system.h"
 #include "esp_event.h"
 #include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 #include "esp_http_client.h"
 #include "esp_flash_partitions.h"
 #include "esp_partition.h"
@@ -22,7 +23,6 @@
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
-#include "mbedtls/certs.h"
 #include "mbedtls/ecdsa.h"
 #include "bootloader_common.h"
 #include "esp_wifi.h"
@@ -40,6 +40,9 @@ mbedtls_ecdsa_context mbedtls_ecdsa_ctx;
 #define NAME2SECTOR(sectorname) esp_partition_find_first(ESP_PARTITION_TYPE_ANY,ESP_PARTITION_SUBTYPE_ANY,sectorlabel[sectorname])
 char sectorlabel[][10]={"buffer","lcmcert_1","lcmcert_2","ota_0","ota_1"}; //label of sector in partition table to index. zero reserved
 
+int active_cert_sector;
+int backup_cert_sector;
+
 static int  verify = 1;
 uint8_t userbeta=0;
 uint8_t otabeta=0;
@@ -47,7 +50,7 @@ static byte file_first_byte[]={0xff};
 
 nvs_handle_t lcm_handle;
 void  ota_nvs_init() {
-    UDPLGP("\n\n\n\n%s %s version %s\n",esp_ota_get_app_description()->project_name,ota_boot()?"OTABOOT":"OTAMAIN",esp_ota_get_app_description()->version);
+    UDPLGP("\n\n\n\n%s %s version %s\n",esp_app_get_description()->project_name,ota_boot()?"OTABOOT":"OTAMAIN",esp_app_get_description()->version);
     esp_err_t err = nvs_flash_init(); // Initialize NVS
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // OTA app partition table has a smaller NVS partition size than the non-OTA
@@ -273,7 +276,7 @@ void  ota_pre_wifi() {
             esp_partition_write(partition,0x4040-4,(byte *)(uint32_t*)&led,4);
         }
         if (led>127) led-=128;
-        if (led && led<34) xTaskCreate(led_blink_task, "ledblink", 1024, NULL, 1, &ledblinkHandle);
+        if (led && led<34) xTaskCreate(led_blink_task, "ledblink", 2048, NULL, 1, &ledblinkHandle);
     }
 }
 
@@ -409,9 +412,9 @@ int ota_get_pubkey(int sector) { //get the ecdsa key from the indicated sector, 
     //    mbedtls_mpi d;              /*!<  our secret value                  */
     //    mbedtls_ecp_point Q;        /*!<  our public value                  */
     mbedtls_ecdsa_init(&mbedtls_ecdsa_ctx);
-    mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.grp, MBEDTLS_ECP_DP_SECP384R1);
-    ret=mbedtls_ecp_point_read_binary(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q,buffer+23,length);
-    printf("keycheck: 0x%02x\n",mbedtls_ecp_check_pubkey(&mbedtls_ecdsa_ctx.grp,&mbedtls_ecdsa_ctx.Q));
+    mbedtls_ecp_group_load(&mbedtls_ecdsa_ctx.MBEDTLS_PRIVATE(grp), MBEDTLS_ECP_DP_SECP384R1);
+    ret=mbedtls_ecp_point_read_binary(&mbedtls_ecdsa_ctx.MBEDTLS_PRIVATE(grp),&mbedtls_ecdsa_ctx.MBEDTLS_PRIVATE(Q),buffer+23,length);
+    printf("keycheck: 0x%02x\n",mbedtls_ecp_check_pubkey(&mbedtls_ecdsa_ctx.MBEDTLS_PRIVATE(grp),&mbedtls_ecdsa_ctx.MBEDTLS_PRIVATE(Q)));
     UDPLGP("ret: %d\n",ret);
 
     if (!ret)return PKEYSIZE; else return ret;
@@ -425,7 +428,7 @@ void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
     mbedtls_sha512_context sha;
     
     mbedtls_sha512_init(&sha);
-    mbedtls_sha512_starts_ret(&sha,1); //SHA384
+    mbedtls_sha512_starts(&sha,1); //SHA384
     //printf("bytes: ");
     for (bytes=0;bytes<filesize-1024;bytes+=1024) {
         //printf("%d ",bytes);
@@ -433,7 +436,7 @@ void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
             UDPLGP("error reading flash\n");   break;
         }
         if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
-        mbedtls_sha512_update_ret(&sha, buffer, 1024);
+        mbedtls_sha512_update(&sha, buffer, 1024);
     }
     //printf("%d\n",bytes);
     if (esp_partition_read(NAME2SECTOR(start_sector),bytes,(byte *)buffer,filesize-bytes)!=ESP_OK) {
@@ -441,8 +444,8 @@ void ota_hash(int start_sector, int filesize, byte * hash, byte first_byte) {
     }
     if (!bytes && first_byte!=0xff) buffer[0]=first_byte;
     //printf("filesize %d\n",filesize);
-    mbedtls_sha512_update_ret(&sha, buffer, filesize-bytes);
-    mbedtls_sha512_finish_ret(&sha, hash);
+    mbedtls_sha512_update(&sha, buffer, filesize-bytes);
+    mbedtls_sha512_finish(&sha, hash);
     mbedtls_sha512_free(&sha);
 }
 
@@ -489,7 +492,7 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
     char buf[512];
     int ret, flags;
     
-    printf("free heap %d\n",xPortGetFreeHeapSize());
+    printf("free heap %lu\n",xPortGetFreeHeapSize());
     mbedtls_net_init(socket);
     UDPLGP("Connecting to %s:%d...\n", host, port);
     if ((ret = mbedtls_net_connect(socket, host,itoa(port,buf,10),MBEDTLS_NET_PROTO_TCP)) != 0) {
@@ -723,10 +726,10 @@ char* ota_get_version(char * repo) {
             strcpy(version,prerelease);
         }
     }
-    if (ota_boot() && ota_compare(version,(char*)esp_ota_get_app_description()->version)<0) { //this acts when setting up a new version
+    if (ota_boot() && ota_compare(version,(char*)esp_app_get_description()->version)<0) { //this acts when setting up a new version
         free(version);
-        version=malloc(strlen((char*)esp_ota_get_app_description()->version)+1);
-        strcpy(version,(char*)esp_ota_get_app_description()->version);
+        version=malloc(strlen((char*)esp_app_get_description()->version)+1);
+        strcpy(version,(char*)esp_app_get_description()->version);
     }
     
     UDPLGP("%s@version:\"%s\"\n",repo,version);

@@ -3,12 +3,15 @@
 #include <stdint.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include <lwip/sockets.h>
 #include "form_urlencoded.h"
-#include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 #include "esp_https_server.h"
 #include "nvs.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/entropy.h"
 
 #define WIFI_CONFIG_SERVER_PORT 80
 
@@ -337,7 +340,7 @@ static void https_task(void *arg) {
 }
 
 static void https_start() {
-    xTaskCreate(https_task, "wcHTTPS", 20480, NULL, 2, &context->https_task_handle);
+    xTaskCreate(https_task, "wcHTTPS", 28784, NULL, 2, &context->https_task_handle);
 }
 
 static void https_stop() {
@@ -679,7 +682,7 @@ void serial_input(void *arg) {
     "Will start Wifi AP for config if no input in 10 seconds\n"
     "Press <enter> to begin\n"
     "Too Late, Typo? Just restart\n"
-    , esp_ota_get_app_description()->version);
+    , esp_app_get_description()->version);
     timeleft=10; //wait 10 seconds after presenting the welcome message
     len=tty_readline(cmd_buffer, CMD_BUF_SIZE); //collect the <enter>
     timeleft=1000; //wait 15+ minutes
@@ -728,11 +731,11 @@ void serial_input(void *arg) {
         char    string[2048];
         size_t  size;
         uint8_t number;
-        nvs_iterator_t it = nvs_entry_find("nvs", "LCM", NVS_TYPE_ANY);
+        nvs_iterator_t it = NULL;
+        esp_err_t res = nvs_entry_find("nvs", "LCM", NVS_TYPE_ANY, &it);
         nvs_entry_info_t info;
-        while (it != NULL) {
+        while(res == ESP_OK) {
             nvs_entry_info(it, &info);
-            it = nvs_entry_next(it);
             printf("namespace:%-15s key:%-15s type:%2d  value: ", info.namespace_name, info.key, info.type);
             if (info.type==0x21) { //string
                 string[0]=0;size=2048;
@@ -746,7 +749,9 @@ void serial_input(void *arg) {
                 nvs_get_u8(lcm_handle,info.key,&number);
                 printf("%d\n",number);
             }
+            res = nvs_entry_next(&it);
         }
+        nvs_release_iterator(it);
         printf("SSID=%s\nPassword=%s\n",wifi_config.sta.ssid,wifi_config.sta.password);
 
         printf("\nPress <enter> if this is OK,\n"
