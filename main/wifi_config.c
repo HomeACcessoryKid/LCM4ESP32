@@ -298,17 +298,17 @@ static void https_task(void *arg) {
     INFO("Starting HTTPS server");
     httpd_handle_t https_server = NULL;
     httpd_ssl_config_t conf = HTTPD_SSL_CONFIG_DEFAULT();
-    const unsigned char    cacert_pem[RSA_BUF_SIZE];
+    const unsigned char    srvcert_pem[RSA_BUF_SIZE];
     const unsigned char    prvtkey_pem[RSA_BUF_SIZE];
     size_t  size=RSA_BUF_SIZE;
     
-    if (nvs_get_str(lcm_handle,"self_cert",(char *)cacert_pem,&size) == ESP_ERR_NVS_NOT_FOUND) {
+    if (nvs_get_str(lcm_handle,"self_cert",(char *)srvcert_pem,&size) == ESP_ERR_NVS_NOT_FOUND) {
         gen_cert();
         size=RSA_BUF_SIZE;
-        nvs_get_str(lcm_handle,"self_cert",(char *)cacert_pem,&size);
+        nvs_get_str(lcm_handle,"self_cert",(char *)srvcert_pem,&size);
     }
-    conf.cacert_pem = cacert_pem;
-    conf.cacert_len = size;
+    conf.servercert     = srvcert_pem;
+    conf.servercert_len = size;
     size=RSA_BUF_SIZE;
     nvs_get_str(lcm_handle,"self_skey",(char *)prvtkey_pem,&size);
     conf.prvtkey_pem = prvtkey_pem;
@@ -340,7 +340,7 @@ static void https_task(void *arg) {
 }
 
 static void https_start() {
-    xTaskCreate(https_task, "wcHTTPS", 28784, NULL, 2, &context->https_task_handle);
+    xTaskCreate(https_task, "wcHTTPS", 20480, NULL, 2, &context->https_task_handle);
 }
 
 static void https_stop() {
@@ -752,7 +752,7 @@ void serial_input(void *arg) {
             res = nvs_entry_next(&it);
         }
         nvs_release_iterator(it);
-        printf("SSID=%s\nPassword=%s\n",wifi_config.sta.ssid,wifi_config.sta.password);
+        printf("SSID:                     %s\nPassword:                 %s\n",wifi_config.sta.ssid,wifi_config.sta.password);
 
         printf("\nPress <enter> if this is OK,\n"
                 "Enter any other value to try again\n");
