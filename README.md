@@ -1,9 +1,9 @@
 # LCM4ESP32
 life-cycle-manager for ESP32
 
-Partition table has been changed (need 64k less for ota_0) so reflash the table if you have an alpha deployment.  
+Partition table has been changed several times so reflash the table if it does not match your current setup.  
 
-Beta stages of porting LCM: https://github.com/HomeACcessoryKid/life-cycle-manager to ESP32.  
+ReleaseCandidate stages of porting LCM: https://github.com/HomeACcessoryKid/life-cycle-manager to ESP32.  
 All functions* are working by now so it has become useful
 
 Feedback is welcome, while I accumulate latest fixes for 1.0

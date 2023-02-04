@@ -3,14 +3,19 @@ set(srcs
     )
 
 if(BOOTLOADER_BUILD)
-    set(include_dirs "include" "include_bootloader")
-    set(priv_requires micro-ecc spi_flash efuse)
+    set(include_dirs    "${IDF_PATH}/components/bootloader_support/include" 
+                        "include_bootloader"
+                        "${IDF_PATH}/components/bootloader_support/bootloader_flash/include"
+                        "${IDF_PATH}/components/bootloader_support/private_include")
+    set(priv_requires micro-ecc spi_flash efuse esp_app_format)
     list(APPEND priv_requires hal)
 else()
-    set(include_dirs "include")
-    set(priv_include_dirs "include_bootloader")
+    set(include_dirs    "${IDF_PATH}/components/bootloader_support/include" 
+                        "include_bootloader"
+                        "${IDF_PATH}/components/bootloader_support/bootloader_flash/include")
+    set(priv_include_dirs "${IDF_PATH}/components/bootloader_support/private_include")
     # heap is required for `heap_memory_layout.h` header
-    set(priv_requires spi_flash mbedtls efuse app_update heap)
+    set(priv_requires spi_flash mbedtls efuse heap esp_app_format)
 endif()
 
 

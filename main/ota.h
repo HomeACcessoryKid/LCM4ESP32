@@ -54,8 +54,8 @@ typedef struct {
     byte sign[SIGNSIZE];
 } signature_t;
 
-int active_cert_sector;
-int backup_cert_sector;
+extern int active_cert_sector;
+extern int backup_cert_sector;
 
 void  ota_pre_wifi();
 
