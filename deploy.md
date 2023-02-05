@@ -38,6 +38,24 @@ write_flash --flash_mode dio --flash_freq 80m --flash_size detect \
 0x08000 s2partition-table.bin \
 0xf0000 s2otaboot.bin
 ```
+_ESP32S3_:
+```
+cd to-where-you-downloaded-the-below-three-files
+esptool.py --chip esp32s3 --port /dev/cu.usb* --baud 460800 --before default_reset --after hard_reset \
+write_flash --flash_mode dio --flash_freq 80m --flash_size detect \
+0x00000 s3bootloader.bin \
+0x08000 s3partition-table.bin \
+0xf0000 s3otaboot.bin
+```
+_ESP32C2_: BROKEN TILL ISSUE https://github.com/espressif/esp-idf/issues/10704 IS SOLVED
+```
+cd to-where-you-downloaded-the-below-three-files
+esptool.py --chip esp32c2 --port /dev/cu.usb* --baud 460800 --before default_reset --after hard_reset \
+write_flash --flash_mode dio --flash_freq 80m --flash_size detect \
+0x000000 c2bootloader.bin \
+0x008000 c2partition-table.bin \
+0x100000 c2otaboot.bin
+```
 _ESP32C3_:
 ```
 cd to-where-you-downloaded-the-below-three-files
@@ -66,7 +84,7 @@ If you want to practice, the default settings are to load an app called (lcm-dem
 It will show some basic info and reset every 30s.
 In a menu you can change nvs fields and test all of the features of LCM.
 Also, if you use 3 powercycles, it will start otamain after those 30s.
-If you use 4 powercycles, it will also reset otaversion to 0.0.0 which forces a new laod of the user app.
+If you use 4 powercycles, it will also reset otaversion to 0.0.0 which forces a new load of the user app.
 You can learn from how this app is created how you can include this behaviour in your own app.
 
 PS. There is no more otabootbeta.bin anymore. Use 12 powercycles instead.
@@ -114,6 +132,52 @@ idf.py all
 cp build/LCM4ESP32.bin versions1/0.9.9v/s2otaboot.bin
 cp build/partition_table/partition-table.bin versions1/0.9.9v/s2partition-table.bin
 cp build/bootloader/bootloader.bin versions1/0.9.9v/s2bootloader.bin
+```
+_for esp32s3_
+```
+../switchto.sh s3
+y
+cp x-s3partitions.csv partitions.csv
+```
+- create the ota-main program
+```
+export -n EXTRA_CFLAGS
+idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
+idf.py app
+mv build/LCM4ESP32.bin versions1/0.9.9v/s3otamain.bin
+```
+- create the ota-boot program.  
+```
+EXTRA_CFLAGS=-DOTABOOT
+export EXTRA_CFLAGS
+idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
+idf.py all
+cp build/LCM4ESP32.bin versions1/0.9.9v/s3otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.9.9v/s3partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.9.9v/s3bootloader.bin
+```
+_for esp32c2_
+```
+../switchto.sh c2
+y
+cp x-c2partitions.csv partitions.csv
+```
+- create the ota-main program
+```
+export -n EXTRA_CFLAGS
+idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
+idf.py app
+mv build/LCM4ESP32.bin versions1/0.9.9v/c2otamain.bin
+```
+- create the ota-boot program.  
+```
+EXTRA_CFLAGS=-DOTABOOT
+export EXTRA_CFLAGS
+idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
+idf.py all
+cp build/LCM4ESP32.bin versions1/0.9.9v/c2otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.9.9v/c2partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.9.9v/c2bootloader.bin
 ```
 _for esp32c3_
 ```
@@ -173,6 +237,24 @@ cat hash len sign > s2otaboot.bin.sig
 ~/bin/ecc_signer s2otamain.bin ../secp384r1prv.der ../secp384r1pub.der
 printf "%08x" `cat s2otamain.bin | wc -c`| xxd -r -p > len
 cat hash len sign > s2otamain.bin.sig
+rm hash len sign
+```
+```
+~/bin/ecc_signer s3otaboot.bin ../secp384r1prv.der ../secp384r1pub.der
+printf "%08x" `cat s3otaboot.bin | wc -c`| xxd -r -p > len
+cat hash len sign > s3otaboot.bin.sig
+~/bin/ecc_signer s3otamain.bin ../secp384r1prv.der ../secp384r1pub.der
+printf "%08x" `cat s3otamain.bin | wc -c`| xxd -r -p > len
+cat hash len sign > s3otamain.bin.sig
+rm hash len sign
+```
+```
+~/bin/ecc_signer c2otaboot.bin ../secp384r1prv.der ../secp384r1pub.der
+printf "%08x" `cat c2otaboot.bin | wc -c`| xxd -r -p > len
+cat hash len sign > c2otaboot.bin.sig
+~/bin/ecc_signer c2otamain.bin ../secp384r1prv.der ../secp384r1pub.der
+printf "%08x" `cat c2otamain.bin | wc -c`| xxd -r -p > len
+cat hash len sign > c2otamain.bin.sig
 rm hash len sign
 ```
 ```

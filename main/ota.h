@@ -11,6 +11,9 @@
 #elif CONFIG_IDF_TARGET_ESP32S3
  #define MAINFILE "s3otamain.bin"
  #define BOOTFILE "s3otaboot.bin"
+#elif CONFIG_IDF_TARGET_ESP32C2
+ #define MAINFILE "c2otamain.bin"
+ #define BOOTFILE "c2otaboot.bin"
 #elif CONFIG_IDF_TARGET_ESP32C3
  #define MAINFILE "c3otamain.bin"
  #define BOOTFILE "c3otaboot.bin"

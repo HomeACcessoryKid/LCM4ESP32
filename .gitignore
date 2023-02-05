@@ -1,7 +1,8 @@
-x-32[bs]*
-x-s2[bs]*
-x-s3[bs]*
-x-c3[bs]*
-x-h2[bs]*
+x-32b*
+x-s2b*
+x-s3b*
+x-c3b*
+x-c2b*
+x-h2b*
 build
 sdkconfig.old
