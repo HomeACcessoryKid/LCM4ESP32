@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.9.9+ Certificates updated
+- GitHub updated their server certificates so need for new Root CA certs
+
 ## 0.9.9 ported to IDF v5.0
 - many small changes
 - same functionality
