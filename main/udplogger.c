@@ -21,7 +21,7 @@ void udplog_send(void *pvParameters){
 //     while (sdk_wifi_station_get_connect_status() != STATION_GOT_IP) vTaskDelay(20); //Check if we have an IP every 200ms 
     esp_netif_ip_info_t info;
     esp_netif_t* esp_netif;
-    while ((esp_netif=esp_netif_next(NULL))==NULL || !esp_netif_is_netif_up(esp_netif) || esp_netif_get_ip_info(esp_netif,&info)!=ESP_OK || info.ip.addr==0) vTaskDelay(20);
+    while ((esp_netif=esp_netif_next_unsafe(NULL))==NULL || !esp_netif_is_netif_up(esp_netif) || esp_netif_get_ip_info(esp_netif,&info)!=ESP_OK || info.ip.addr==0) vTaskDelay(20);
 
     lSocket = lwip_socket(AF_INET, SOCK_DGRAM, 0);
     memset((char *)&sLocalAddr, 0, sizeof(sLocalAddr));

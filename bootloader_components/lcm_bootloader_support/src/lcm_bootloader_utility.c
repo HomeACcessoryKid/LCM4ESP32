@@ -70,6 +70,7 @@
 #include "hal/gpio_hal.h"
 
 bool lcm_bootloader_rtc(uint32_t count) {
+#if CONFIG_IDF_TARGET_ESP32
     bool temp_boot=false;
     rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
     uint8_t custom1=rtcmem->custom[1];
@@ -82,6 +83,10 @@ bool lcm_bootloader_rtc(uint32_t count) {
     rtcmem->custom[1]=0; //reset the temp_boot flag for the next boot
     bootloader_common_update_rtc_retain_mem(NULL,false); //this will update the CRC only
     return temp_boot;
+#else // not CONFIG_IDF_TARGET_ESP32
+    // other than ESP32 do not support RTC memory and need to transfer count value in flash
+    return false; // C2 will set 4 start-bits from user code to achieve temp_boot mode
+#endif // CONFIG_IDF_TARGET_ESP32
 }
 
 // uncomment to add a boot delay, allows you time to connect

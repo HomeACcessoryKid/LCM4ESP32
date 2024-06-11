@@ -268,7 +268,9 @@ static void gen_cert() {
     
     mbedtls_x509write_crt_init( &crt );
     mbedtls_x509write_crt_set_version( &crt, MBEDTLS_X509_CRT_VERSION_3 );
-    mbedtls_x509write_crt_set_serial( &crt, &serial );
+    char serialstring[24]; size_t sslen;
+    mbedtls_mpi_write_string(&serial, 10, serialstring, 24, &sslen);
+    mbedtls_x509write_crt_set_serial_raw( &crt, (unsigned char *)serialstring, sslen);
     mbedtls_x509write_crt_set_validity( &crt, "20220222222222", "22220222222222" );
     mbedtls_x509write_crt_set_md_alg( &crt, MBEDTLS_MD_SHA1 );
     mbedtls_x509write_crt_set_issuer_name( &crt, RSA_NAME );

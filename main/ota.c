@@ -77,10 +77,10 @@ char *ota_strstr(const char *full_string, const char *search) { //lowercase vers
         ch++;
     }
     const char *found = strstr(lc_string, search);
-    free(lc_string);
-    if(found == NULL) return NULL;    
-    const int offset = (int) found - (int) lc_string;
+    if(found == NULL) {free(lc_string); return NULL;}
     
+    const int offset = (int) found - (int) lc_string;
+    free(lc_string);
     return (char *) ((int) full_string + offset);
 }
 
@@ -114,6 +114,7 @@ void   led_blink_task(void *pvParameter) {
 
 static uint8_t count=0,rtc_read_busy=1;
 void ota_rtc_read_task(void *arg) {
+#if CONFIG_IDF_TARGET_ESP32
     if (bootloader_common_get_rtc_retain_mem_reboot_counter()) { //if zero, RTC CRC not valid
         rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
         count=rtcmem->custom[0]; //byte zero for count
@@ -121,6 +122,9 @@ void ota_rtc_read_task(void *arg) {
         count=0;
     }
     bootloader_common_reset_rtc_retain_mem(); //this will clear RTC
+#else
+    //do nothing for now
+#endif
     rtc_read_busy=0;
     vTaskDelete(NULL);
 }
@@ -365,11 +369,11 @@ void  ota_init() {
         }
     }
     //time support
-    sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
     //setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0", 3); //https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
     //tzset();
-    sntp_init();
+    esp_sntp_init();
 
     ota_active_sector();
     
@@ -492,7 +496,7 @@ static int ota_connect(char* host, int port, mbedtls_net_context *socket, mbedtl
     char buf[512];
     int ret, flags;
     
-    printf("free heap %lu\n",xPortGetFreeHeapSize());
+    printf("free heap %u\n",xPortGetFreeHeapSize());
     mbedtls_net_init(socket);
     UDPLGP("Connecting to %s:%d...\n", host, port);
     if ((ret = mbedtls_net_connect(socket, host,itoa(port,buf,10),MBEDTLS_NET_PROTO_TCP)) != 0) {
@@ -1077,11 +1081,15 @@ int   ota_boot(void) {
 
 static uint8_t rtc_write_busy=1;
 void ota_rtc_write_task(void *arg) {
+#if CONFIG_IDF_TARGET_ESP32
     rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
     bootloader_common_reset_rtc_retain_mem(); //this will clear RTC    
     rtcmem->reboot_counter=1;
     rtcmem->custom[1]=1; //byte one for temp_boot signal (from app to bootloader)
     bootloader_common_update_rtc_retain_mem(NULL,false); //this will update the CRC only
+#else
+    //do nothing for now
+#endif
     rtc_write_busy=0;
     vTaskDelete(NULL);
 }
