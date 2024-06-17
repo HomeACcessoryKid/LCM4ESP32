@@ -1,6 +1,9 @@
 # Changelog
 (c) 2018-2024 HomeAccessoryKid
 
+## 0.10.1 fixed c3 partition size for C3
+- c3otamain.bin was too big to fit
+
 ## 0.10.0 use flash instead of RTC
 - due to lack of support of RTC in all platforms
 - uses bitfield to encode count and temp-boot

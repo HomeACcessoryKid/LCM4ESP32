@@ -101,13 +101,13 @@ cd LCM4ESP32
 - initial steps to be expanded
 
 #### These are the steps if not introducing a new key pair
-- create/update the file versions1/latest-pre-release without new-line and setup 0.10.0 version folder
+- create/update the file versions1/latest-pre-release without new-line and setup 0.10.1 version folder
 ```
-echo 0.10.0 > version.txt
-mkdir versions1/0.10.0v
-echo -n 0.10.0 > versions1/0.10.0v/latest-pre-release
-cp versions1/certs.sector versions1/certs.sector.sig versions1/0.10.0v
-cp versions1/public*key*   versions1/0.10.0v
+echo 0.10.1 > version.txt
+mkdir versions1/0.10.1v
+echo -n 0.10.1 > versions1/0.10.1v/latest-pre-release
+cp versions1/certs.sector versions1/certs.sector.sig versions1/0.10.1v
+cp versions1/public*key*   versions1/0.10.1v
 ```
 _for esp32s2_
 ```
@@ -119,7 +119,7 @@ cp x-s2partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.10.0v/s2otamain.bin
+mv build/LCM4ESP32.bin versions1/0.10.1v/s2otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -127,9 +127,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.10.0v/s2otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.10.0v/s2partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.10.0v/s2bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.10.1v/s2otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.10.1v/s2partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.10.1v/s2bootloader.bin
 ```
 _for esp32s3_
 ```
@@ -141,7 +141,7 @@ cp x-s3partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.10.0v/s3otamain.bin
+mv build/LCM4ESP32.bin versions1/0.10.1v/s3otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -149,9 +149,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.10.0v/s3otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.10.0v/s3partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.10.0v/s3bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.10.1v/s3otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.10.1v/s3partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.10.1v/s3bootloader.bin
 ```
 _for esp32c2_
 ```
@@ -163,7 +163,7 @@ cp x-c2partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.10.0v/c2otamain.bin
+mv build/LCM4ESP32.bin versions1/0.10.1v/c2otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -171,9 +171,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.10.0v/c2otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.10.0v/c2partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.10.0v/c2bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.10.1v/c2otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.10.1v/c2partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.10.1v/c2bootloader.bin
 ```
 _for esp32c3_
 ```
@@ -185,7 +185,7 @@ cp x-c3partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.10.0v/c3otamain.bin
+mv build/LCM4ESP32.bin versions1/0.10.1v/c3otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -193,9 +193,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.10.0v/c3otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.10.0v/c3partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.10.0v/c3bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.10.1v/c3otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.10.1v/c3partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.10.1v/c3bootloader.bin
 ```
 _for esp32_
 ```
@@ -207,7 +207,7 @@ cp x-32partitions.csv partitions.csv
 export -n EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py app
-mv build/LCM4ESP32.bin versions1/0.10.0v/32otamain.bin
+mv build/LCM4ESP32.bin versions1/0.10.1v/32otamain.bin
 ```
 - create the ota-boot program.  
 ```
@@ -215,9 +215,9 @@ EXTRA_CFLAGS=-DOTABOOT
 export EXTRA_CFLAGS
 idf.py fullclean >/dev/null 2>&1; rm -rf /mnt/main
 idf.py all
-cp build/LCM4ESP32.bin versions1/0.10.0v/32otaboot.bin
-cp build/partition_table/partition-table.bin versions1/0.10.0v/32partition-table.bin
-cp build/bootloader/bootloader.bin versions1/0.10.0v/32bootloader.bin
+cp build/LCM4ESP32.bin versions1/0.10.1v/32otaboot.bin
+cp build/partition_table/partition-table.bin versions1/0.10.1v/32partition-table.bin
+cp build/bootloader/bootloader.bin versions1/0.10.1v/32bootloader.bin
 ```
 
 - remove the older version files
@@ -273,13 +273,13 @@ rm hash len sign
 ### _use 12 powercycles to get into lcm beta mode if that is what you want_
 - test otaboot for basic behaviour
 - commit and sync submodules (not applicable for now)
-- commit this locally with the description of version 0.10.0 taken from Changelog
+- commit this locally with the description of version 0.10.1 taken from Changelog
 - add the version tag and push to github
 ```
-git tag 0.10.0 HEAD
+git tag 0.10.1 HEAD
 git push --tags origin HEAD
 ```
-- on Github website, set up a new github release 0.10.0 as a pre-release using the just commited master...  
+- on Github website, set up a new github release 0.10.1 as a pre-release using the just commited master...  
 - upload the certs and binaries to the pre-release assets on github  
 #
 - erase the flash and upload the privatekey
@@ -289,17 +289,17 @@ esptool.py -p /dev/cu.usbserial-* --baud 230400 write_flash 0xf9000 versions1-pr
 ```
 - upload the ota-boot BETA program to the device that contains the private key
 ```
-make flash OTAVERSION=0.10.0 OTABETA=1
+make flash OTAVERSION=0.10.1 OTABETA=1
 ```
 - setup wifi and select the ota-demo repo without pre-release checkbox  
 - create the 2 signature files next to the bin file and upload to github one by one  
 - verify the hashes on the computer  
 ```
-openssl sha384 versions1/0.10.0v/otamain.bin
-xxd versions1/0.10.0v/otamain.bin.sig
+openssl sha384 versions1/0.10.1v/otamain.bin
+xxd versions1/0.10.1v/otamain.bin.sig
 ```
 
-- upload the file versions1/0.10.0v/latest-pre-release to the 'latest release' assets on github
+- upload the file versions1/0.10.1v/latest-pre-release to the 'latest release' assets on github
 
 <br>
 <br>
