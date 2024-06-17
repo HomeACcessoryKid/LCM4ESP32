@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2018-2021 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * (c) 2018-2024 HomeAccessoryKid
  */
 #include <string.h>
 #include <stdint.h>
@@ -69,26 +71,6 @@
 
 #include "hal/gpio_hal.h"
 
-bool lcm_bootloader_rtc(uint32_t count) {
-#if CONFIG_IDF_TARGET_ESP32
-    bool temp_boot=false;
-    rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
-    uint8_t custom1=rtcmem->custom[1];
-    if (bootloader_common_get_rtc_retain_mem_reboot_counter()) { //if zero, RTC CRC not valid
-        if (custom1) temp_boot=true; //byte one  for temp_boot signal (from app to bootloader)    
-    }
-    bootloader_common_update_rtc_retain_mem(NULL, true); //prepare RTC memory and increment reboot_counter
-    if (count>255) count=255;
-    rtcmem->custom[0]=(uint8_t)count;            //byte zero for count,
-    rtcmem->custom[1]=0; //reset the temp_boot flag for the next boot
-    bootloader_common_update_rtc_retain_mem(NULL,false); //this will update the CRC only
-    return temp_boot;
-#else // not CONFIG_IDF_TARGET_ESP32
-    // other than ESP32 do not support RTC memory and need to transfer count value in flash
-    return false; // C2 will set 4 start-bits from user code to achieve temp_boot mode
-#endif // CONFIG_IDF_TARGET_ESP32
-}
-
 // uncomment to add a boot delay, allows you time to connect
 // a terminal before rBoot starts to run and output messages
 // value is in microseconds
@@ -98,8 +80,13 @@ bool lcm_bootloader_rtc(uint32_t count) {
 // indicates where the powercycle tracker bits are stored,
 // first half for continue-bits, last half for start-bits
 // other space between rboot-config and this address can be used for other purposes
-#define BOOT_BITS_ADDR 0x40 // target value 0x40 and is relative to start of INactive ota_data sector
+#define OTA_DATA_SIZE  0x40 // target value 0x40 and is relative to start of INactive ota_data sector
+#define COUNT_VAL_SIZE 0x10 // the COUNT_VAL area comes first and is 0x2C0 in size
+#define COUNT_VAL_ADDR OTA_DATA_SIZE
+#define BOOT_BITS_ADDR (COUNT_VAL_ADDR+COUNT_VAL_SIZE) //0x300
 #define FIELD_SIZE (SPI_SEC_SIZE-BOOT_BITS_ADDR)/2
+
+static uint32_t offset=0; //global variable to store the address where the LCM bitfields are stored = inactive half of otadata
 
 uint32_t lcm_bootloader_count(const bootloader_state_t *bs) {
 //     ESP_LOGI("BL4LCM32","ota_info: 0x%x  0x%x",bs->ota_info.offset,bs->ota_info.size);
@@ -111,8 +98,8 @@ uint32_t lcm_bootloader_count(const bootloader_state_t *bs) {
 //     bootloader_flash_read(bs->ota_info.offset, &buff, 32, 0);
 //     for (int i=0; i<8; i++) ESP_LOGI("BL4LCM32","%d=0x%x",i,buff[i]);
     if (buff1==UINT32_MAX) buff1=0; //for uninitialized ota_data[1]
-    uint32_t offset=(buff1>buff0)?bs->ota_info.offset:bs->ota_info.offset+SPI_SEC_SIZE; //select the INactive part
-    //TODO: choose a better algorithm because this on is not perfect
+    offset=(buff1>buff0)?bs->ota_info.offset:bs->ota_info.offset+SPI_SEC_SIZE; //select the INactive part
+    //TODO: choose a better algorithm because this one is not perfect
 
 /* --------------------------------------------
 Assumptions for the storage of start- and continue-bits
@@ -129,10 +116,10 @@ the last byte will contain the amount of open continue-bits and is a signal for 
     uint32_t loadAddr=offset+BOOT_BITS_ADDR+FIELD_SIZE;
     bootloader_flash_read(last_addr-4, &count, 4,0);
     if (count<33) { //default value is 0xffffffff
-    	uint32_t buffer[BOOT_BITS_ADDR/4];
-        bootloader_flash_read(offset, buffer, BOOT_BITS_ADDR,0);
+    	uint32_t buffer[OTA_DATA_SIZE/4];
+        bootloader_flash_read(offset, buffer, OTA_DATA_SIZE,0);
         bootloader_flash_erase_range(offset,SPI_SEC_SIZE);
-        bootloader_flash_write(offset, buffer, BOOT_BITS_ADDR,0);
+        bootloader_flash_write(offset, buffer, OTA_DATA_SIZE,0);
         start_bits=(uint32_t)~0>>count; //clear start-bits based on value of count
         bootloader_flash_write(loadAddr,&start_bits,4,0);
     }
@@ -144,14 +131,14 @@ the last byte will contain the amount of open continue-bits and is a signal for 
 
     esp_rom_printf("BL4LCM32: 0=0x%x  1=0x%x  offset=0x%x\n",buff0,buff1,offset);
     if (count<33)  esp_rom_printf("BL4LCM32: reformatted start_bits field: %08x count: %d\n",start_bits,count);
-    //read the led_pin info from BOOT_BITS_ADDR-4 from both sectors
-    bootloader_flash_read(bs->ota_info.offset+            +BOOT_BITS_ADDR-4, &buff0, 4,0);
-    bootloader_flash_read(bs->ota_info.offset+SPI_SEC_SIZE+BOOT_BITS_ADDR-4, &buff1, 4,0);
+    //read the led_pin info from OTA_DATA_SIZE-4 from both sectors
+    bootloader_flash_read(bs->ota_info.offset+            +OTA_DATA_SIZE-4, &buff0, 4,0);
+    bootloader_flash_read(bs->ota_info.offset+SPI_SEC_SIZE+OTA_DATA_SIZE-4, &buff1, 4,0);
     if (buff0!=buff1) { //out of sync, must correct, lowest value is the target
         if (buff0<buff1) {
-            bootloader_flash_write(bs->ota_info.offset+SPI_SEC_SIZE+BOOT_BITS_ADDR-4, &buff0, 4,0);
+            bootloader_flash_write(bs->ota_info.offset+SPI_SEC_SIZE+OTA_DATA_SIZE-4, &buff0, 4,0);
         } else {
-            bootloader_flash_write(bs->ota_info.offset+            +BOOT_BITS_ADDR-4, &buff1, 4,0);
+            bootloader_flash_write(bs->ota_info.offset+            +OTA_DATA_SIZE-4, &buff1, 4,0);
             buff0=buff1;
         }
     } //buff0 contains flash based led_info
@@ -214,7 +201,97 @@ the last byte will contain the amount of open continue-bits and is a signal for 
         bootloader_flash_write(last_addr-4,&help_bits,4,0);
     }
 //  --------------------------------------------
-//  End of rboot4lcm key code. count is used further down for choosing rom and stored in rtc for ota-main to interpret
+//  End of rboot4lcm key code. count is used further down for choosing rom and stored in flash for ota-main to interpret
 //  ---------------------------------------------
     return count;
+}
+
+bool lcm_bootloader_rtc(uint32_t count) {
+    bool temp_boot=false;
+    // transfer count value and temp_boot flag in flash
+    // 12->0000, 34567->0010, 89A->0100, BCD->0110, EFG->1000   and temp_boot->1100 in the way back
+    int ii,jj,vv,lvv;
+    uint32_t val,new,word0,word1,word2;
+    
+    if      (count<= 2) new=0;
+    else if (count<= 7) new=2;
+    else if (count<=10) new=4;
+    else if (count<=13) new=6;
+    else if (count<=16) new=8;
+    else if (count<=19) new=10;//unassigned
+    else                new=0; //illegal choice
+    
+    // if first byte==0xFFFFFFFF initialise with first 4 x 0 bits 0x0FFFFFFF and last byte with 0xFFFFFFFE = last bit 0
+    uint32_t count_addr=offset+COUNT_VAL_ADDR;
+    bootloader_flash_read(count_addr, &word1, 4, 0);
+    if (word1==UINT32_MAX) {
+        word1=0x0FFFFFFF; word2=0xFFFFFFFE;
+        bootloader_flash_write(count_addr,                 &word1,4,0);
+        bootloader_flash_write(count_addr+COUNT_VAL_SIZE-4,&word2,4,0);
+    }
+    // read 4 bytes at a time (32 bit words)
+    uint32_t bytes=0;
+    do {bytes+=4; //first word can never fit the end sequence
+        bootloader_flash_read(count_addr+bytes, &word2, 4, 0);
+    } while ( !(word2==UINT32_MAX || (word2&0xF)==0xE) ); //all bits set or ends in 0b1110
+    bytes-=4; //address the word before this as word1
+    bootloader_flash_read(count_addr+bytes, &word1, 4, 0);
+    //esp_rom_printf("xxxxxxxx %08lx %08lx  ", word1, word2);
+    
+    if (word2<UINT32_MAX-1) {word1=word2; word2=UINT32_MAX; bytes+=4;} //already started with bits in the last word, shift right
+    
+    val=0; ii=0;
+    if ((word1&0xF)==0xE) { //word1 ends in 0xE
+        ii=1; //skip last bit
+        esp_rom_printf("will reflash\n");
+        word0=0;//write last start-bits-word = 0x00000000 -> provokes flash erase in next boot
+        bootloader_flash_write(offset+SPI_SEC_SIZE-4,&word0,4,0);
+    }
+    word0=0x10000000; // to detect if we need to flash or not
+    // extract current value where we first evaluate word1 and conditionally word0 
+    while ( (word1>>ii)&1 ) ii++; //find bit number ii for right-most zero
+    for (jj=ii+1,vv=1; jj<32&&vv<4; jj++,vv++) if (word1>>jj&1) val+=(1<<vv); // copy three bits to val with index vv
+    lvv=vv; // store the val index for later
+    if(vv<4) { // we need word0 to complete the reading
+        bootloader_flash_read(count_addr+bytes-4,  &word0, 4, 0);
+        for (jj=0; vv<4; jj++,vv++)            if (word0>>jj&1) val+=(1<<vv); // fill val up to 3 bits, left are lvv bits
+    }
+    esp_rom_printf("%08lx %08lx %08lx  ", word0, word1, word2);
+    esp_rom_printf("val=%ld, ii=%d, jj=%d, vv=%d, lvv=%d, bytes=%ld, count_addr=%0lx\n",val,ii,jj,vv,lvv,bytes,count_addr);
+    
+    if ( val==0xC) temp_boot=true; //0b1100, will only be set by external apps to signal temp_boot
+    
+    if ( val!=new ) { // decide if new value is different, else do nothing
+        //reset bits on the left
+        for (jj=ii;jj<ii+lvv;jj++) word1&=(~(1<<jj)); //put all lvv leftside bits to zero
+        if (ii>28) word0=0; // wipe out previous word when less than 4 bits in this word
+
+        switch (new) { // convert new value to new word(s). Make vv one less than relevant positions
+            case 2: //..10
+                vv=1; //need 1 bit beside the righthand zero
+                break;
+            case 4: //.100
+            case 6: //.110
+                vv=2; //need 2 bits beside the righthand zero
+                break;
+            case 8: //1000
+            case 10://1010  unassigned
+                vv=3; //need 3 bits beside the righthand zero
+                break;
+            default://1110 which is the EOF code, 0000 which is already encoded and 1100 reserved for temp_boot signaling
+                vv=-1; // do nothing since not legal/already done
+                break;
+        }
+        
+        for (jj=ii-1; jj>=0&&vv>=0; jj--,vv--) if (!(new&(1<<vv))) word1&=(~(1<<jj)); //transfer bits to word1
+        if (vv>=0) for (jj=31;vv>=0;jj--,vv--) if (!(new&(1<<vv))) word2&=(~(1<<jj)); //if bits lvv,  to word2
+        
+        esp_rom_printf("%08lx %08lx %08lx  new=%ld\n", word0, word1, word2, new);
+        //write words to flash
+        if (word0==0         )  bootloader_flash_write(count_addr+bytes-4,&word0,4,0);
+        if (word1!=0x10000000)  bootloader_flash_write(count_addr+bytes  ,&word1,4,0); //stupid compare to shut up compiler
+        if (word2!=UINT32_MAX)  bootloader_flash_write(count_addr+bytes+4,&word2,4,0);
+    }
+
+    return temp_boot;
 }

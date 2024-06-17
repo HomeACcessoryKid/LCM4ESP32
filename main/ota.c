@@ -1,4 +1,4 @@
-/*  (c) 2018-2022 HomeAccessoryKid */
+/*  (c) 2018-2024 HomeAccessoryKid */
 #include <string.h>
 #include <time.h>
 #include <sys/time.h>
@@ -112,28 +112,14 @@ void   led_blink_task(void *pvParameter) {
     vTaskDelete(NULL);
 }
 
-static uint8_t count=0,rtc_read_busy=1;
-void ota_rtc_read_task(void *arg) {
-#if CONFIG_IDF_TARGET_ESP32
-    if (bootloader_common_get_rtc_retain_mem_reboot_counter()) { //if zero, RTC CRC not valid
-        rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
-        count=rtcmem->custom[0]; //byte zero for count
-    } else {
-        count=0;
-    }
-    bootloader_common_reset_rtc_retain_mem(); //this will clear RTC
-#else
-    //do nothing for now
-#endif
-    rtc_read_busy=0;
-    vTaskDelete(NULL);
-}
 
+static int ii,lvv;
+static uint32_t bytes=0,count_addr=0,word0=0x10000000,word1,word2;    
 void  ota_pre_wifi() {
     UDPLGP("--- ota_pre_wifi\n");
     const esp_partition_t *partition=NULL;
 #ifdef OTABOOT
-    // checking if partition table contains the minimum parts, only the size, not the location
+   {// checking if partition table contains the minimum parts, only the size, not the location
     // otadata,    data,   ota,    0x09000,   0x2000,
     // phy_init,   data,   phy,    0x0b000,   0x1000,
     // lcmcert_1,  0x65,   0x18,   0x0c000,   0x1000,
@@ -166,12 +152,48 @@ void  ota_pre_wifi() {
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_APP,ESP_PARTITION_SUBTYPE_APP_OTA_0,"ota_0");
     if (partition && partition->size>=0xc0000) {} else {UDPLGP("ota_0 not OK! ABORT\n");vTaskDelete(NULL);}
     
-    UDPLGP("OK\n");
-#endif
-    rtc_read_busy=1;
-    xTaskCreatePinnedToCore(ota_rtc_read_task,"rtcr",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
-    while (rtc_read_busy) vTaskDelay(1);
-	uint8_t user_count=1,count_step=3;
+    UDPLGP("OK\n"); } // partition check
+#endif // OTABOOT
+    // transfer count value and temp_boot flag in flash
+    // 12->0000, 34567->0010, 89A->0100, BCD->0110, EFG->1000   and temp_boot->1100 in the way back
+    int jj,vv;
+    uint32_t val;    
+    partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata");
+    if (partition && partition->size==0x2000) {
+        esp_partition_read(partition,      0, &word1, 4);
+        esp_partition_read(partition, 0x1000, &word2, 4);
+        if (word2==UINT32_MAX) word2=0; //for uninitialized ota_data[1]
+        count_addr=(word2>word1)?0x40:0x1040; //select the INactive part
+    } 
+    else {UDPLGP("otadata not OK! ABORT\n");vTaskDelete(NULL);}
+    
+    // read 4 bytes at a time (32 bit words)
+    do {bytes+=4; //first word can never fit the end sequence
+        esp_partition_read(partition, count_addr+bytes, &word2, 4);
+    } while ( !(word2==UINT32_MAX || (word2&0xF)==0xE) ); //all bits set or ends in 0b1110
+    bytes-=4; //address the word before this as word1
+    esp_partition_read(partition, count_addr+bytes, &word1, 4);
+    //UDPLGP("xxxxxxxx %08lx %08lx\n", word1, word2);
+    
+    if (word2<UINT32_MAX-1) {word1=word2; word2=UINT32_MAX; bytes+=4;} //already started with bits in the last word, shift right
+    
+    val=0; ii=0;
+    if ((word1&0xF)==0xE) { //word1 ends in 0xE
+        ii=1; //skip last bit
+    }
+    // extract current value where we first evaluate word1 and conditionally word0 
+    while ( (word1>>ii)&1 ) ii++; //find bit number ii for right-most zero
+    for (jj=ii+1,vv=1; jj<32&&vv<4; jj++,vv++) if (word1>>jj&1) val+=(1<<vv); // copy three bits to val with index vv
+    lvv=vv; // store the val index for later
+    if(vv<4) { // we need word0 to complete the reading
+        esp_partition_read(partition, count_addr+bytes-4,  &word0, 4);
+        for (jj=0; vv<4; jj++,vv++)            if (word0>>jj&1) val+=(1<<vv); // fill val up to 3 bits, left are lvv bits
+    }
+    UDPLGP("%08lx %08lx %08lx ", word0, word1, word2);
+    UDPLGP("val=%ld, ii=%d, jj=%d, vv=%d, lvv=%d, bytes=%ld, count_addr=%0lx\n",val,ii,jj,vv,lvv,bytes,count_addr);
+    uint8_t count=3*val/2+3; //count_step=3 only
+
+	uint8_t user_count=1;
     char *value=NULL;
     bool reset_wifi=0;
     bool reset_otabeta=0;
@@ -179,9 +201,6 @@ void  ota_pre_wifi() {
 
     nvs_get_u8(lcm_handle,"lcm_beta", &otabeta); //NOTE: if a key does not exist, the value remains unchanged
     nvs_get_u8(lcm_handle,"ota_beta", &userbeta);
-    nvs_get_u8(lcm_handle,"ota_count_step", &count_step);
-    if (count_step>3 || count_step<1) count_step=3;
-    UDPLGP("--- count_step=%d\n",count_step);
     
     nvs_get_u8(lcm_handle,"ota_count", &user_count);
     if (user_count>0) {
@@ -191,15 +210,16 @@ void  ota_pre_wifi() {
 	if (count<2) count=user_count;
     
     UDPLGP("--- count=%d\n",count);
-    if      (count<5+count_step*1) { //standard ota-main or ota-boot behavior
+    // 12->0000, 34567->0010, 89A->0100, BCD->0110, EFG->1000
+    if      (count<=7) { //standard ota-main or ota-boot behavior
             value="--- standard ota";
     }
-    else if (count<5+count_step*2) { //reset wifi parameters and clear LCM_beta
+    else if (count<=10) { //reset wifi parameters and clear LCM_beta
             value="--- reset wifi and clear LCM_beta";
             reset_wifi=1;
             reset_otabeta=1;
     }
-    else if (count<5+count_step*3) { //reset wifi parameters and set LCM_beta
+    else if (count<=13) { //reset wifi parameters and set LCM_beta
             value="--- reset wifi and set LCM_beta";
             reset_wifi=1;
             otabeta=1;
@@ -209,9 +229,9 @@ void  ota_pre_wifi() {
             factory_reset=1;
     }
     UDPLGP("%s\n",value);
-    if (count>4+count_step) {
+    if (count>7) {
         UDPLGP("IF this is NOT what you wanted, reset/power-down NOW!\n");
-        for (int i=19;i>-1;i--) {
+        for (int i=count*4;i>-1;i--) {
             vTaskDelay(1000/portTICK_PERIOD_MS);
             UDPLGP("%s in %d s\n",value,i);
         }
@@ -275,9 +295,9 @@ void  ota_pre_wifi() {
     nvs_get_u8(lcm_handle,"led_pin", &led); //default is zero
     //write value of led to ota-data partition
     if (led) {
-        if ((partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata") ) ) {
+        if ((partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata") )) {
             esp_partition_write(partition,  0x40-4,(byte *)(uint32_t*)&led,4);
-            esp_partition_write(partition,0x4040-4,(byte *)(uint32_t*)&led,4);
+            esp_partition_write(partition,0x1040-4,(byte *)(uint32_t*)&led,4);
         }
         if (led>127) led-=128;
         if (led && led<34) xTaskCreate(led_blink_task, "ledblink", 2048, NULL, 1, &ledblinkHandle);
@@ -362,7 +382,7 @@ void  ota_init() {
             const esp_partition_t *partition=NULL;
             if ((partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata") )) {
                 esp_partition_write(partition,  0x40-4,(byte *)(uint32_t*)&led,4);
-                esp_partition_write(partition,0x4040-4,(byte *)(uint32_t*)&led,4);
+                esp_partition_write(partition,0x1040-4,(byte *)(uint32_t*)&led,4);
             }
             if (led>127) led-=128;
             if (led && led<34) xTaskCreate(led_blink_task, "ledblink", 1024, NULL, 1, &ledblinkHandle);
@@ -1079,30 +1099,6 @@ int   ota_boot(void) {
     return 1-bootrom;
 }
 
-static uint8_t rtc_write_busy=1;
-void ota_rtc_write_task(void *arg) {
-#if CONFIG_IDF_TARGET_ESP32
-    rtc_retain_mem_t* rtcmem=bootloader_common_get_rtc_retain_mem(); //access to the memory struct
-    bootloader_common_reset_rtc_retain_mem(); //this will clear RTC    
-    rtcmem->reboot_counter=1;
-    rtcmem->custom[1]=1; //byte one for temp_boot signal (from app to bootloader)
-    bootloader_common_update_rtc_retain_mem(NULL,false); //this will update the CRC only
-#else
-    //do nothing for now
-#endif
-    rtc_write_busy=0;
-    vTaskDelete(NULL);
-}
-
-void  ota_temp_boot(void) {
-    UDPLGP("--- ota_temp_boot\n");
-    rtc_write_busy=1;
-    xTaskCreatePinnedToCore(ota_rtc_write_task,"rtcw",4096,NULL,1,NULL,0); //CPU_0 PRO_CPU needed for rtc operations
-    while (rtc_write_busy) vTaskDelay(1);
-    vTaskDelay(50); //allows UDPLOG to flush
-    esp_restart();
-}
-
 void  ota_reboot(void) {
     UDPLGP("--- ota_reboot\n");
     if (ledblinkHandle) {
@@ -1111,6 +1107,33 @@ void  ota_reboot(void) {
     }
     vTaskDelay(50); //allows UDPLOG to flush
     esp_restart();
+}
+
+void  ota_temp_boot(void) {
+    UDPLGP("--- ota_temp_boot\n");
+    const esp_partition_t *partition=NULL;
+    partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata");
+    if (partition && partition->size==0x2000) {
+        int jj,vv;
+        uint32_t new;    
+        //reset bits on the left
+        for (jj=ii;jj<ii+lvv;jj++) word1&=(~(1<<jj)); //put all lvv leftside bits to zero
+        if (ii>28) word0=0; // wipe out previous word when less than 4 bits in this word
+
+        new=0xC; //0b1100, to signal temp_boot
+        vv=3; //need 3 bits beside the righthand zero
+        for (jj=ii-1; jj>=0&&vv>=0; jj--,vv--) if (!(new&(1<<vv))) word1&=(~(1<<jj)); //transfer bits to word1
+        if (vv>=0) for (jj=31;vv>=0;jj--,vv--) if (!(new&(1<<vv))) word2&=(~(1<<jj)); //if bits lvv,  to word2
+        
+        UDPLGP("%08lx %08lx %08lx  new=%ld\n", word0, word1, word2, new);
+        //write words to flash
+        if (word0==0         )  esp_partition_write(partition,count_addr+bytes-4,&word0,4);
+        if (word1!=0x10000000)  esp_partition_write(partition,count_addr+bytes  ,&word1,4); //stupid compare to shut up compiler
+        if (word2!=UINT32_MAX)  esp_partition_write(partition,count_addr+bytes+4,&word2,4);
+    } 
+    else UDPLGP("otadata not OK! normal reboot\n");
+
+    ota_reboot();
 }
 
 int  ota_emergency(char * *ota_srvr) {

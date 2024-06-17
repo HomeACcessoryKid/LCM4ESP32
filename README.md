@@ -8,7 +8,9 @@ All functions* are working by now so it has become useful
 
 Feedback is welcome, while I accumulate latest fixes for 1.0
 
-Do not use before it reaches v1.0.0 unless you feel like experimenting together with me  
+Do not use before it reaches v1.0.0 unless you feel like experimenting together with me
+Updates have been stalled for a year because the support for RTC was inconsistent.
+From 0.10.0 the RTC has been abandoned and a bitfield in flash is used.
 
 Documentation is now in beta stage as well...
 
@@ -24,7 +26,7 @@ also see Changelog.md
 
 # Life-Cycle-Manager for ESP32 family (LCM4ESP32)
 Initial install, WiFi settings and over the air firmware upgrades for any ESP32 IDF repository on GitHub  
-(c) 2022 HomeAccessoryKid
+(c) 2018-2024 HomeAccessoryKid
 
 ## Version
 [Changelog](https://github.com/HomeACcessoryKid/LCM4ESP32/blob/master/Changelog.md)  
@@ -47,38 +49,21 @@ The modified bootloader is able to count the amount of short power cycles (<1.5s
 From the second cycle the cycles must be shorter than 4 seconds. Also a LED is lit if defined.  
 The boot loader conveys the count to the loaded code using a rtc custom value  
 User code is allowed the values from 1-4  
-- 1  : this is a normal boot
-- 2-4: users choice in user code (communicate 3 to user or risk a bit and use 2, 3 and 4 separatly)
+- 1 or 2 : this is a normal boot
+- 3 or 4 : users choice in user code
 
 If count > 4 the bootloader launches LCM otamain.bin in ota-1 partition  
-
-For these values the behaviour is controlled through the nvs string `LCM/ota_count_step`.  
-The default value of 3 reduces the chance of user misscounting and triggering something else than intended or playfull children.
 
 Note that with LCM_beta mode and wifi erased you can set any emergency fallback server to collect a new signed version of otaboot.bin.
 This is to prevent a lockout as witnessed when Github changed their webserver in 2020.  
 Tested with macOS [builtin apache server](https://discussions.apple.com/docs/DOC-13841).  
-By monitoring the output with the terminal command `nc -kulnw0 45678` you have 10 seconds to see which action was chosen before it executes.
+By monitoring the output with the terminal command `nc -kulnw0 45678` you have at least `4 x count` seconds to see which action was chosen before it executes.
 
-If `ota_count_step=="3"` (default)
+Count:
 - 5-7: check for new code  (communicate 6 to user)
 - 8-10: erase wifi info and clear LCM_beta mode (communicate 9 to user)
 - 11-13: erase wifi info and set LCM_beta mode and gain access to emergency mode (communicate 12 to user)
 - 14-16: factory reset (communicate 15 to user)
-
-If `ota_count_step=="2"`
-- 5-6: check for new code  (communicate 5 to user)
-- 7-8: erase wifi info and clear LCM_beta mode (communicate 7 to user)
-- 9-10: erase wifi info and set LCM_beta mode and gain access to emergency mode (communicate 9 to user)
-- 11-12: factory reset (communicate 11 to user)
-
-If `ota_count_step=="1"`
-- 5: check for new code  (communicate 5 to user)
-- 6: erase wifi info and clear LCM_beta mode (communicate 6 to user)
-- 7: erase wifi info and set LCM_beta mode and gain access to emergency mode (communicate 7 to user)
-- 8: factory reset (communicate 8 to user)
-
-Missing or other `ota_count_step` values will be interpreted as 3
 
 User apps that need some configuration data to work that is specific to each instantiation
 can set the `LCM/ota_string` parameter which can be parsed by the user app to set e.g. MQTT server, user and password or whatever else you fancy.

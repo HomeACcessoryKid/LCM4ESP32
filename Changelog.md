@@ -1,4 +1,17 @@
 # Changelog
+(c) 2018-2024 HomeAccessoryKid
+
+## 0.10.0 use flash instead of RTC
+- due to lack of support of RTC in all platforms
+- uses bitfield to encode count and temp-boot
+- count_step concept no longer supported, fixed to 3
+- reflection timer longer the more impact chosen
+
+## update to idf v5.3 beta2
+- Certificate updated to reflect May2024 update by GitHub
+- Disabled rtc memory in all but ESP32 since that is not supported
+- anymore (at least it doesn’t compile anymore)
+- Various breaking diffs from idf v5.0
 
 ## 0.9.9+ Certificates updated
 - GitHub updated their server certificates so need for new Root CA certs

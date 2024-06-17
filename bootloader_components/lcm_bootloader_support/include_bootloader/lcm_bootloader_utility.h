@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2018-2021 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * (c) 2018-2024 HomeAccessoryKid
  */
 #pragma once
 

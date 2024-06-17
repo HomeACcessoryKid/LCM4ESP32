@@ -1,4 +1,4 @@
-/* (c) 2018-2022 HomeAccessoryKid
+/* (c) 2018-2024 HomeAccessoryKid
  * LCM4ESP32 based on LifeCycleManager dual app
  */
 
