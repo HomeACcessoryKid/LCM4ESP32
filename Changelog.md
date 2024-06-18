@@ -1,6 +1,11 @@
 # Changelog
 (c) 2018-2024 HomeAccessoryKid
 
+## 0.10.2 usercount code remapping
+- can now distinguish between count 1, 2, 3 and 4 in user code
+- partition tables updated
+- compiled for all chips
+
 ## 0.10.1 fixed c3 partition size for C3
 - c3otamain.bin was too big to fit
 

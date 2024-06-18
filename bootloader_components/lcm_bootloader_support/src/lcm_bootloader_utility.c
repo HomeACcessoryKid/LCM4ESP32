@@ -209,18 +209,23 @@ the last byte will contain the amount of open continue-bits and is a signal for 
 bool lcm_bootloader_rtc(uint32_t count) {
     bool temp_boot=false;
     // transfer count value and temp_boot flag in flash
-    // 12->0000, 34567->0010, 89A->0100, BCD->0110, EFG->1000   and temp_boot->1100 in the way back
+    // 1->0000, 2567->0010, 389A->0100, 4BCD->0110, EFG->1000   and temp_boot->1100 in the way back
     int ii,jj,vv,lvv;
     uint32_t val,new,word0,word1,word2;
     
-    if      (count<= 2) new=0;
-    else if (count<= 7) new=2;
-    else if (count<=10) new=4;
-    else if (count<=13) new=6;
-    else if (count<=16) new=8;
-    else if (count<=19) new=10;//unassigned
-    else                new=0; //illegal choice
-    
+    if (count<=4) { //count can range from 1 to 16
+        if      (count== 1) new=0;
+        else if (count== 2) new=2;
+        else if (count== 3) new=4;
+        else                new=6; //count==4
+    } else { //otamain
+        if      (count<= 7) new=2;
+        else if (count<=10) new=4;
+        else if (count<=13) new=6;
+        else if (count<=16) new=8;
+        else if (count<=19) new=10;//unassigned
+        else                new=0; //illegal choice
+    }
     // if first byte==0xFFFFFFFF initialise with first 4 x 0 bits 0x0FFFFFFF and last byte with 0xFFFFFFFE = last bit 0
     uint32_t count_addr=offset+COUNT_VAL_ADDR;
     bootloader_flash_read(count_addr, &word1, 4, 0);

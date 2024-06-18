@@ -49,8 +49,8 @@ The modified bootloader is able to count the amount of short power cycles (<1.5s
 From the second cycle the cycles must be shorter than 4 seconds. Also a LED is lit if defined.  
 The boot loader conveys the count to the loaded code using a rtc custom value  
 User code is allowed the values from 1-4  
-- 1 or 2 : this is a normal boot
-- 3 or 4 : users choice in user code
+- 1  : this is a normal boot
+- 2-4: users choice in user code (communicate 3 to user or risk a bit and use 2, 3 and 4 separatly)
 
 If count > 4 the bootloader launches LCM otamain.bin in ota-1 partition  
 

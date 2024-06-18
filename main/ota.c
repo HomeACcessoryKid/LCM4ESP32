@@ -155,7 +155,7 @@ void  ota_pre_wifi() {
     UDPLGP("OK\n"); } // partition check
 #endif // OTABOOT
     // transfer count value and temp_boot flag in flash
-    // 12->0000, 34567->0010, 89A->0100, BCD->0110, EFG->1000   and temp_boot->1100 in the way back
+    // 1->0000, 2567->0010, 389A->0100, 4BCD->0110, EFG->1000   and temp_boot->1100 in the way back
     int jj,vv;
     uint32_t val;    
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_OTA,"otadata");
@@ -207,10 +207,10 @@ void  ota_pre_wifi() {
         nvs_erase_key(lcm_handle,"ota_count");
         nvs_commit(lcm_handle);
     }
-	if (count<2) count=user_count;
+	if (count<5) count=user_count; //if temp-boot, val==0, count==3
     
     UDPLGP("--- count=%d\n",count);
-    // 12->0000, 34567->0010, 89A->0100, BCD->0110, EFG->1000
+    // 1->0000, 2567->0010, 389A->0100, 4BCD->0110, EFG->1000   and temp_boot->1100 in the way back
     if      (count<=7) { //standard ota-main or ota-boot behavior
             value="--- standard ota";
     }
