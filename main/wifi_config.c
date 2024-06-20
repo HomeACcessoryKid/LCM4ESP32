@@ -210,7 +210,7 @@ static esp_err_t get_handler(httpd_req_t *req) {
     if (xSemaphoreTake(wifi_networks_mutex, 5000 / portTICK_PERIOD_MS)) {
         wifi_network_info_t *net = wifi_networks;
         while (net) {
-printf("ssid:%s,mode:%d\n",net->ssid,net->secure);
+            printf("ssid:%s,mode:%d\n",net->ssid,net->secure);
             snprintf(buffer, sizeof(buffer),html_network_item,net->secure ? "secure" : "unsecure", net->ssid);
             httpd_resp_send_chunk(req, buffer,                  HTTPD_RESP_USE_STRLEN);
             net = net->next;
@@ -251,7 +251,6 @@ static void gen_cert() {
     mbedtls_pk_context *key = &selfsigned_key;
     mbedtls_x509write_cert crt;
     unsigned char buf[RSA_BUF_SIZE];
-    mbedtls_mpi serial;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
 
@@ -259,18 +258,17 @@ static void gen_cert() {
     mbedtls_entropy_init( &entropy );
     mbedtls_ctr_drbg_seed( &ctr_drbg, mbedtls_entropy_func, &entropy, (const unsigned char *) "LCM4ESP32_rsa_genkey", 20 );
 
-    mbedtls_mpi_init( &serial );
-    mbedtls_mpi_fill_random(&serial, 7, mbedtls_ctr_drbg_random, &ctr_drbg);
-    
     mbedtls_pk_init( &selfsigned_key );
     mbedtls_pk_setup( &selfsigned_key, mbedtls_pk_info_from_type( MBEDTLS_PK_RSA ) );
     mbedtls_rsa_gen_key( mbedtls_pk_rsa( selfsigned_key ), mbedtls_ctr_drbg_random, &ctr_drbg, RSA_KEY_SIZE, RSA_EXPONENT );
     
     mbedtls_x509write_crt_init( &crt );
     mbedtls_x509write_crt_set_version( &crt, MBEDTLS_X509_CRT_VERSION_3 );
-    char serialstring[24]; size_t sslen;
-    mbedtls_mpi_write_string(&serial, 10, serialstring, 24, &sslen);
-    mbedtls_x509write_crt_set_serial_raw( &crt, (unsigned char *)serialstring, sslen);
+    char serialstring[21]; //while the serial can be any integer, this one only applies decimal ascii so ~10^19 entropy = OK
+    utoa(esp_random(),serialstring                     ,10); //random uint32 gives up to 10 digits of decimal
+    utoa(esp_random(),serialstring+strlen(serialstring),10); //so total string cannot exceed 20 chars, per RFC-5280 4.1.2.2
+    printf("serialstring=%s\n",serialstring);
+    mbedtls_x509write_crt_set_serial_raw( &crt, (unsigned char *)serialstring, strlen(serialstring));
     mbedtls_x509write_crt_set_validity( &crt, "20220222222222", "22220222222222" );
     mbedtls_x509write_crt_set_md_alg( &crt, MBEDTLS_MD_SHA1 );
     mbedtls_x509write_crt_set_issuer_name( &crt, RSA_NAME );
@@ -291,7 +289,6 @@ static void gen_cert() {
 
     mbedtls_ctr_drbg_free( &ctr_drbg );
     mbedtls_entropy_free( &entropy );
-    mbedtls_mpi_free( &serial );
     mbedtls_pk_free( &selfsigned_key );
     mbedtls_x509write_crt_free( &crt );
 }
@@ -336,8 +333,9 @@ static void https_task(void *arg) {
         }
     }
     INFO("Stopping HTTPS server");
-    if (https_server) httpd_ssl_stop(https_server);
+    // if (https_server) httpd_ssl_stop(https_server); //this function never returns!!!
     context->https_task_handle=NULL;
+    INFO("Stopped HTTPS server");
     vTaskDelete(NULL);
 }
 
@@ -424,6 +422,7 @@ static void http_task(void *arg) {
     INFO("Stopping HTTP server");
     lwip_close(listenfd);
     context->http_task_handle=NULL;
+    INFO("Stopped HTTP server");
     vTaskDelete(NULL);
 }
 
@@ -520,6 +519,7 @@ static void dns_task(void *arg) {
     lwip_close(fd);
 
     context->dns_task_handle=NULL;
+    INFO("Stopped DNS server");
     vTaskDelete(NULL);
 }
 
@@ -605,6 +605,7 @@ static void wifi_config_softap_stop() {
     https_stop();
     while (context->dns_task_handle || context->http_task_handle || context->https_task_handle) vTaskDelay(20/ portTICK_PERIOD_MS);
     esp_wifi_set_mode(WIFI_MODE_STA);
+    // xSemaphoreTake(wifi_networks_mutex, portMAX_DELAY); //consider this
     INFO("Stopped AP mode");
 }
 
@@ -624,7 +625,8 @@ static int wifi_config_station_connect() {
         return -1;
     }
     INFO("Found configuration, trying to connect to %s", wifi_config.sta.ssid);
-    esp_wifi_connect();
+    // wifi_config_softap_stop(); //consider this
+    esp_wifi_connect(); //TODO: this crashes when password given is wrong
     
     xTimerStart(context->sta_connect_timeout,0);
     return 0;

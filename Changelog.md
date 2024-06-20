@@ -1,6 +1,10 @@
 # Changelog
 (c) 2018-2024 HomeAccessoryKid
 
+## 0.10.3 fix certificate serial and Headers too large
+- made serial code based on esp_random
+- menuconfig header size from 512 to 1024
+
 ## 0.10.2 usercount code remapping
 - can now distinguish between count 1, 2, 3 and 4 in user code
 - partition tables updated
